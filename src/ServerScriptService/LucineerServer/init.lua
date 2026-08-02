@@ -21,6 +21,12 @@ local WorldScanner = require(Lucineer:WaitForChild("WorldScanner"))
 local AudioManager = require(Lucineer:WaitForChild("AudioManager"))
 local BuildAnimator = require(Lucineer:WaitForChild("BuildAnimator"))
 
+-- Server-side managers (live in ServerScriptService)
+local NPCManager = require(script.Parent:WaitForChild("NPCManager"))
+local AchievementManager = require(script.Parent:WaitForChild("AchievementManager"))
+local BondSystem = require(script.Parent:WaitForChild("BondSystem"))
+local EraSystem = require(script.Parent:WaitForChild("EraSystem"))
+
 -- Create RemoteEvents for client ↔ server communication
 local function createRemote(name: string): RemoteEvent
     local existing = Lucineer:FindFirstChild(name)
@@ -165,6 +171,12 @@ local function init()
     -- Audio system
     AudioManager.init()
     AudioManager.setMusic("hub")
+
+    -- Server-side game systems (per UNIFIED_INTEGRATION_PLAN §4)
+    NPCManager.init()
+    AchievementManager.init()
+    BondSystem.init()
+    EraSystem.init()
 
     -- Wire AI responses
     ChatHandler.onResponse(handleResponse)
