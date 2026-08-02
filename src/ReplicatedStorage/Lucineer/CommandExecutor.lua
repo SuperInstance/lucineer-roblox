@@ -2,7 +2,8 @@
     Lucineer Command Executor
     Receives structured build commands from the AI and executes them in the workspace.
     Supports: createPart, createModel, deletePart, movePart, addLight, addSound,
-              addScript, setTerrain, sendMessage, runLua
+              addScript, setTerrain, sendMessage
+    (runLua removed — loadstring is unsafe and disabled by default)
 ]]
 
 local Players = game:GetService("Players")
@@ -171,11 +172,19 @@ end
 ]]
 function CommandExecutor.addLight(params: table): Instance
     local folder = ensureFolder()
-    local lightType = params.type or "Point"
+
+    -- Accept both "type" and "lightType" from generators
+    local lightType = params.type or params.lightType or "Point"
+    -- Strip "Light" suffix if present: "PointLight" -> "Point"
+    lightType = lightType:gsub("Light$", "")
+
     local parent: Instance
 
-    -- Create a carrier part if position is specified
-    if params.position then
+    -- If a parent name is specified, find the existing part to attach the light to
+    if params.parent then
+        parent = findPartByName(params.parent) or folder
+    elseif params.position then
+        -- Create a carrier part if position is specified
         local carrier = Instance.new("Part")
         carrier.Name = (params.name or "Light") .. "Carrier"
         carrier.Size = Vector3.new(0.5, 0.5, 0.5)
@@ -204,7 +213,7 @@ function CommandExecutor.addLight(params: table): Instance
     light.Color = parseColor(params.color or "#FFFFFF")
     light.Parent = parent
 
-    print(string.format("[Lucineer] CommandExecutor: added %sLight '%s'", lightType, light.Name))
+    print(string.format("[Lucineer] CommandExecutor: added %sLight '%s' (parent: %s)", lightType, light.Name, parent.Name))
     return light
 end
 
@@ -322,34 +331,35 @@ function CommandExecutor.sendMessage(params: table): table
 end
 
 --[[
-    runLua: Execute arbitrary Lua source on the server.
-    SECURITY: This should be gated behind auth. Only Lucineer AI commands trigger it.
-    Expects: { source }
-    @return any -- result of the executed code
+    runLua: DISABLED (BUG #9)
+    loadstring is disabled by default on Roblox servers and is unsafe for
+    production use. This command is removed from the command map and should
+    not be re-enabled. If dynamic behavior is needed, use a whitelist of
+    parameterized behaviors instead of arbitrary source strings.
 ]]
-function CommandExecutor.runLua(params: table): any
-    local source = params.source or ""
-    if #source == 0 then
-        warn("[Lucineer] CommandExecutor: runLua — empty source")
-        return nil
-    end
-
-    print(string.format("[Lucineer] CommandExecutor: runLua (%d chars)", #source))
-
-    local fn, err = loadstring(source)
-    if not fn then
-        warn(string.format("[Lucineer] CommandExecutor: runLua compile error: %s", err))
-        return nil, err
-    end
-
-    local ok, result = pcall(fn)
-    if not ok then
-        warn(string.format("[Lucineer] CommandExecutor: runLua runtime error: %s", tostring(result)))
-        return nil, tostring(result)
-    end
-
-    return result
-end
+-- function CommandExecutor.runLua(params: table): any
+--     local source = params.source or ""
+--     if #source == 0 then
+--         warn("[Lucineer] CommandExecutor: runLua — empty source")
+--         return nil
+--     end
+--
+--     print(string.format("[Lucineer] CommandExecutor: runLua (%d chars)", #source))
+--
+--     local fn, err = loadstring(source)
+--     if not fn then
+--         warn(string.format("[Lucineer] CommandExecutor: runLua compile error: %s", err))
+--         return nil, err
+--     end
+--
+--     local ok, result = pcall(fn)
+--     if not ok then
+--         warn(string.format("[Lucineer] CommandExecutor: runLua runtime error: %s", tostring(result)))
+--         return nil, tostring(result)
+--     end
+--
+--     return result
+-- end
 
 ----------------------------------------------------------------
 -- DISPATCHER
@@ -366,7 +376,8 @@ local commandMap: { [string]: (table) -> any } = {
     addScript = CommandExecutor.addScript,
     setTerrain = CommandExecutor.setTerrain,
     sendMessage = CommandExecutor.sendMessage,
-    runLua = CommandExecutor.runLua,
+    -- runLua removed: loadstring is disabled by default and unsafe for production.
+    -- If dynamic behavior is needed, use a whitelist of parameterized behaviors.
 }
 
 --[[
@@ -390,7 +401,14 @@ function CommandExecutor.execute(command: table): (any, string?)
         return nil, string.format("Unknown command type: '%s'", cmdType)
     end
 
-    local ok, result = pcall(handler, command)
+    -- Commands are envelopes: { type = "createPart", params = { ... } }.
+    -- Accept a flat command as a fallback so hand-written test payloads still work.
+    local params = command.params
+    if type(params) ~= "table" then
+        params = command
+    end
+
+    local ok, result = pcall(handler, params)
     if not ok then
         local err = tostring(result)
         warn(string.format("[Lucineer] CommandExecutor: '%s' failed: %s", cmdType, err))

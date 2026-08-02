@@ -72,29 +72,30 @@ local function handleResponse(player: Player, response: table)
             results = results,
         })
 
-        -- If there's a sendMessage command, extract and display it
-        for _, cmd in ipairs(commands) do
-            if cmd.type == "sendMessage" then
+        -- If there's a sendMessage command, extract and display it.
+        -- Commands are envelopes: { type = "sendMessage", params = { message = ... } }.
+        -- The execute() result for sendMessage contains { message = ... }.
+        for i, result in ipairs(results) do
+            if result.success and result.result and result.result.type == "sendMessage" then
                 ResponseRemote:FireClient(player, {
                     type = "message",
-                    message = cmd.message,
+                    message = result.result.message,
                 })
             end
         end
     end
 
-    -- If the response has a direct message
-    if response.message then
+    -- If the response has a direct message (Worker returns 'reply', not 'message')
+    local replyText = response.reply or response.message
+    if replyText then
         ResponseRemote:FireClient(player, {
             type = "message",
-            message = response.message,
+            message = replyText,
         })
     end
 
-    -- If the response has Lua to run
-    if response.lua then
-        CommandExecutor.runLua({ source = response.lua })
-    end
+    -- runLua removed (BUG #9): loadstring is unsafe and disabled by default.
+    -- if response.lua then ... end
 
     -- Done thinking
     ThinkingRemote:FireClient(player, { thinking = false })
@@ -109,9 +110,8 @@ local function syncState()
         local state = WorldScanner.quickScan(player)
         task.spawn(function()
             local _, err = Http.post("/api/state", {
-                playerId = player.UserId,
-                playerName = player.Name,
-                state = state,
+                sessionId     = Config.SESSION_ID,
+                worldSnapshot = state,
             })
             if err then
                 -- Silent fail for state sync — not critical

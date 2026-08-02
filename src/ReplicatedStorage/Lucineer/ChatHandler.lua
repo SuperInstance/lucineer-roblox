@@ -40,13 +40,17 @@ function ChatHandler.processMessage(player: Player, message: string)
     -- Gather world state
     local worldState = WorldScanner.scan(player)
 
-    -- Build the request
+    -- Build the request — must match Worker's expected contract:
+    -- { sessionId, playerName, message, ... }
     local payload = {
-        playerId = player.UserId,
-        playerName = player.Name,
-        message = message,
-        worldState = worldState,
-        placeId = game.PlaceId,
+        sessionId   = Config.SESSION_ID,
+        playerName  = player.Name,
+        message     = message,
+        playerState = {
+            userId   = player.UserId,
+            position = worldState.player and worldState.player.position or nil,
+        },
+        worldSnapshot = worldState,
     }
 
     -- Fire and forget — the Poller will track the job

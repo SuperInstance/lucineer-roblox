@@ -12,9 +12,15 @@ Config.WORKER_URL = "https://lucineer-relay.casey-digennaro.workers.dev"
 -- Authentication key (set this to match your Worker's LUCINEER_AUTH_KEY)
 Config.AUTH_KEY = "feba836ba409a7e959d957c7c4051fa6243a3436367073e52c567f979f49c9a7"
 
+-- Session identity. JobId is unique per server instance; PlaceId scopes it.
+-- This is sent to the Worker so it can route jobs and state to the correct session.
+Config.SESSION_ID = string.format("%d-%s", game.PlaceId,
+    (game.JobId ~= "" and game.JobId or "studio"))
+
 -- Polling
 Config.POLL_INTERVAL = 0.5      -- seconds between job status polls
-Config.POLL_TIMEOUT = 60         -- seconds before a job is considered timed out
+Config.POLL_TIMEOUT = 180        -- seconds before a job is considered timed out
+-- NOTE: Must exceed the brain's DEEP_TIMEOUT (120s) so deep builds aren't abandoned.
 
 -- State sync
 Config.STATE_SYNC_INTERVAL = 10  -- seconds between full world-state syncs

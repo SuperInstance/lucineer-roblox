@@ -94,6 +94,11 @@ function Http.request(url: string, method: string, body: table?): (table?, strin
                 return decoded or {}, nil
             else
                 lastErr = string.format("HTTP %d: %s", result.StatusCode, result.Body or "")
+                -- 4xx is a contract error, not a transient failure. Fail fast.
+                -- (except 429 Too Many Requests, which IS transient)
+                if result.StatusCode >= 400 and result.StatusCode < 500 and result.StatusCode ~= 429 then
+                    return nil, lastErr
+                end
             end
         else
             lastErr = tostring(result)
