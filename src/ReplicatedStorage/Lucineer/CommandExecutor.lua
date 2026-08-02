@@ -4,11 +4,23 @@
     Supports: createPart, createModel, deletePart, movePart, addLight, addSound,
               addScript, setTerrain, sendMessage
     (runLua removed — loadstring is unsafe and disabled by default)
+
+    INTEGRATION: BuildAnimator
+    ───────────────────────────────────────────────
+    Parts created by createPart are collected during executeBatch() and then
+    passed to BuildAnimator.animateBatch() for staggered cinematic reveal:
+    fade-in, scale-up with Back ease, particle bursts, and material-aware sounds.
+
+    Individual execute() calls still animate via animatePart() for single commands.
+
+    "Builds never pop — they arrive in work order."
 ]]
 
 local Players = game:GetService("Players")
 local Terrain = game:GetService("Workspace").Terrain
 local InsertService = game:GetService("InsertService")
+
+local BuildAnimator = require(script.Parent.BuildAnimator)
 
 local CommandExecutor = {}
 
@@ -86,24 +98,44 @@ local function parseMaterial(mat: string?): Enum.Material
 end
 
 ----------------------------------------------------------------
+-- BATCH TRACKING
+----------------------------------------------------------------
+
+-- During executeBatch(), created parts are accumulated here for deferred
+-- animation. This allows BuildAnimator to stagger the reveal of all parts
+-- as a cohesive cinematic sequence rather than each part animating independently.
+local batchCreatedParts: { BasePart } = {}
+local inBatchMode = false
+
+----------------------------------------------------------------
 -- COMMAND IMPLEMENTATIONS
 ----------------------------------------------------------------
 
 --[[
     createPart: Create a new BasePart in the workspace.
     Expects: { name, position, size, material, color, anchored, transparency, shape }
+
+    When called inside executeBatch(), the part is created in a pre-animation
+    state (parented but invisible) and deferred to BuildAnimator.animateBatch().
+    When called standalone via execute(), it animates immediately.
 ]]
 function CommandExecutor.createPart(params: table): Instance
     local folder = ensureFolder()
     local part = Instance.new("Part")
 
     part.Name = params.name or "LucineerPart"
-    part.Position = parseVector3(params.position or { x = 0, y = 5, z = 0 })
-    part.Size = parseVector3(params.size or { x = 4, y = 1, z = 4 })
+
+    -- Store the TARGET values — BuildAnimator will tween to these
+    local targetPosition = parseVector3(params.position or { x = 0, y = 5, z = 0 })
+    local targetSize = parseVector3(params.size or { x = 4, y = 1, z = 4 })
+    local targetTransparency = params.transparency or 0
+
+    part.Position = targetPosition
+    part.Size = targetSize
     part.Material = parseMaterial(params.material)
     part.Color = parseColor(params.color)
     part.Anchored = if params.anchored ~= nil then params.anchored else true
-    part.Transparency = params.transparency or 0
+    part.Transparency = targetTransparency
 
     if params.shape then
         local ok = pcall(function()
@@ -111,8 +143,27 @@ function CommandExecutor.createPart(params: table): Instance
         end)
     end
 
+    -- Pre-animation state: if we're in batch mode, make the part invisible
+    -- and tiny so it's ready for BuildAnimator.animateBatch() to reveal it.
+    if inBatchMode then
+        part.Transparency = 1
+        part.Size = Vector3.new(0.1, 0.1, 0.1)
+    end
+
     part.Parent = folder
-    print(string.format("[Lucineer] CommandExecutor: created Part '%s' at %s", part.Name, tostring(part.Position)))
+
+    -- Track for batch animation
+    if inBatchMode then
+        -- Store the target values on the part so BuildAnimator knows what to tween to.
+        -- We use attributes since they persist with the instance and are type-safe.
+        part:SetAttribute("BA_TargetSizeX", targetSize.X)
+        part:SetAttribute("BA_TargetSizeY", targetSize.Y)
+        part:SetAttribute("BA_TargetSizeZ", targetSize.Z)
+        part:SetAttribute("BA_TargetTransparency", targetTransparency)
+        table.insert(batchCreatedParts, part)
+    end
+
+    print(string.format("[Lucineer] CommandExecutor: created Part '%s' at %s", part.Name, tostring(targetPosition)))
     return part
 end
 
@@ -337,29 +388,6 @@ end
     not be re-enabled. If dynamic behavior is needed, use a whitelist of
     parameterized behaviors instead of arbitrary source strings.
 ]]
--- function CommandExecutor.runLua(params: table): any
---     local source = params.source or ""
---     if #source == 0 then
---         warn("[Lucineer] CommandExecutor: runLua — empty source")
---         return nil
---     end
---
---     print(string.format("[Lucineer] CommandExecutor: runLua (%d chars)", #source))
---
---     local fn, err = loadstring(source)
---     if not fn then
---         warn(string.format("[Lucineer] CommandExecutor: runLua compile error: %s", err))
---         return nil, err
---     end
---
---     local ok, result = pcall(fn)
---     if not ok then
---         warn(string.format("[Lucineer] CommandExecutor: runLua runtime error: %s", tostring(result)))
---         return nil, tostring(result)
---     end
---
---     return result
--- end
 
 ----------------------------------------------------------------
 -- DISPATCHER
@@ -376,8 +404,6 @@ local commandMap: { [string]: (table) -> any } = {
     addScript = CommandExecutor.addScript,
     setTerrain = CommandExecutor.setTerrain,
     sendMessage = CommandExecutor.sendMessage,
-    -- runLua removed: loadstring is disabled by default and unsafe for production.
-    -- If dynamic behavior is needed, use a whitelist of parameterized behaviors.
 }
 
 --[[
@@ -415,16 +441,38 @@ function CommandExecutor.execute(command: table): (any, string?)
         return nil, err
     end
 
+    -- For standalone execute() calls that produce a single part,
+    -- animate it immediately (not in batch mode).
+    if not inBatchMode and result and typeof(result) == "Instance" and result:IsA("BasePart") then
+        if not result:GetAttribute("BA_TargetSizeX") then
+            -- Part was created outside batch mode — animate it directly.
+            BuildAnimator.animatePart(result)
+        end
+    end
+
     return result, nil
 end
 
 --[[
     Execute a batch of commands sequentially.
+
+    During batch execution, all created parts are collected and then passed
+    to BuildAnimator.animateBatch() for staggered cinematic reveal:
+    - Parts fade and scale in with Back/Quad easing
+    - Staggered timing (0.08s between parts) simulates active construction
+    - Each part emits a particle burst and material-aware sound on landing
+    - The final part triggers a multi-colored completion burst
+
     @param commands { table } -- array of command tables
     @return { table } -- array of { success, result, error } per command
 ]]
 function CommandExecutor.executeBatch(commands: { table }): { table }
     local results = {}
+
+    -- Enter batch mode — created parts will be collected for deferred animation
+    inBatchMode = true
+    batchCreatedParts = {}
+
     for i, command in ipairs(commands) do
         local result, err = CommandExecutor.execute(command)
         table.insert(results, {
@@ -435,6 +483,56 @@ function CommandExecutor.executeBatch(commands: { table }): { table }
             error = err,
         })
     end
+
+    -- Exit batch mode
+    inBatchMode = false
+
+    -- If we collected parts during the batch, animate them with staggered timing
+    if #batchCreatedParts > 0 then
+        -- Compute the center position of all created parts for completion burst
+        local sumVec = Vector3.new(0, 0, 0)
+        for _, part in ipairs(batchCreatedParts) do
+            sumVec = sumVec + part.Position
+        end
+        local centerPosition = sumVec / #batchCreatedParts
+
+        -- Restore target sizes before animating (BuildAnimator.animateBatch reads part.Size as target)
+        for _, part in ipairs(batchCreatedParts) do
+            local tx = part:GetAttribute("BA_TargetSizeX")
+            local ty = part:GetAttribute("BA_TargetSizeY")
+            local tz = part:GetAttribute("BA_TargetSizeZ")
+            local ttrans = part:GetAttribute("BA_TargetTransparency")
+
+            if tx then
+                -- Restore the target size and transparency on the part so
+                -- BuildAnimator.animateBatch (which reads part.Size as the tween target)
+                -- will tween to the correct values. Then re-apply the pre-animation state.
+                local targetSize = Vector3.new(tx, ty, tz)
+
+                -- Set the part to its target size/transparency momentarily,
+                -- then call animatePart which records the target and squashes it.
+                part.Size = targetSize
+                part.Transparency = ttrans or 0
+
+                -- Clean up attributes
+                part:RemoveAttribute("BA_TargetSizeX")
+                part:RemoveAttribute("BA_TargetSizeY")
+                part:RemoveAttribute("BA_TargetSizeZ")
+                part:RemoveAttribute("BA_TargetTransparency")
+            end
+        end
+
+        local partCount = #batchCreatedParts
+
+        -- Now pass the full list to BuildAnimator for the staggered cinematic reveal
+        BuildAnimator.animateBatch(batchCreatedParts, centerPosition)
+
+        -- Clear the tracking list
+        table.clear(batchCreatedParts)
+
+        print(string.format("[Lucineer] CommandExecutor: animated batch of %d parts via BuildAnimator", partCount))
+    end
+
     return results
 end
 
