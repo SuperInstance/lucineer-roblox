@@ -10,7 +10,7 @@ local Config = {}
 Config.WORKER_URL = "https://lucineer-relay.casey-digennaro.workers.dev"
 
 -- Authentication key (set this to match your Worker's LUCINEER_AUTH_KEY)
-Config.AUTH_KEY = "feba836ba409a7e959d957c7c4051fa6243a3436367073e52c567f979f49c9a7"
+Config.AUTH_KEY = "" -- Auth removed: player endpoint no longer requires key (see Worker hardening #3)
 
 -- Session identity. JobId is unique per server instance; PlaceId scopes it.
 -- This is sent to the Worker so it can route jobs and state to the correct session.
