@@ -1,0 +1,50 @@
+{
+  "name": "Lucineer",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Lucineer": {
+        "$className": "Folder",
+        "Config": {
+          "$path": "src/ReplicatedStorage/Lucineer/Config.lua"
+        },
+        "Http": {
+          "$path": "src/ReplicatedStorage/Lucineer/Http.lua"
+        },
+        "Poller": {
+          "$path": "src/ReplicatedStorage/Lucineer/Poller.lua"
+        },
+        "ChatHandler": {
+          "$path": "src/ReplicatedStorage/Lucineer/ChatHandler.lua"
+        },
+        "CommandExecutor": {
+          "$path": "src/ReplicatedStorage/Lucineer/CommandExecutor.lua"
+        },
+        "WorldScanner": {
+          "$path": "src/ReplicatedStorage/Lucineer/WorldScanner.lua"
+        },
+        "UIManager": {
+          "$path": "src/ReplicatedStorage/Lucineer/UIManager.lua"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "LucineerServer": {
+        "$className": "Script",
+        "$path": "src/ServerScriptService/LucineerServer/init.lua"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "LucineerClient": {
+          "$className": "LocalScript",
+          "$path": "src/StarterPlayer/StarterPlayerScripts/LucineerClient/init.lua"
+        }
+      }
+    }
+  }
+}
