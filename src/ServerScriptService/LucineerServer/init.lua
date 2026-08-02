@@ -18,6 +18,8 @@ local Poller = require(Lucineer:WaitForChild("Poller"))
 local ChatHandler = require(Lucineer:WaitForChild("ChatHandler"))
 local CommandExecutor = require(Lucineer:WaitForChild("CommandExecutor"))
 local WorldScanner = require(Lucineer:WaitForChild("WorldScanner"))
+local AudioManager = require(Lucineer:WaitForChild("AudioManager"))
+local BuildAnimator = require(Lucineer:WaitForChild("BuildAnimator"))
 
 -- Create RemoteEvents for client ↔ server communication
 local function createRemote(name: string): RemoteEvent
@@ -45,6 +47,11 @@ local function handleResponse(player: Player, response: table)
     print(string.format("[Lucineer] Server: received response for %s", player.Name))
 
     if response.error then
+        -- Play error UI sound
+        AudioManager.playUi("error")
+        -- Stop thinking vocal cue if active
+        AudioManager.stopThinking()
+
         ResponseRemote:FireClient(player, {
             type = "error",
             message = response.message or "Unknown error",
@@ -53,10 +60,16 @@ local function handleResponse(player: Player, response: table)
         return
     end
 
+    -- Play thinking vocal cue while processing
+    AudioManager.playCue("thinking")
+
     -- If the response contains commands, execute them
     local commands = response.commands or response.actions or {}
     if #commands > 0 then
         print(string.format("[Lucineer] Server: executing %d commands for %s", #commands, player.Name))
+
+        -- Switch to build music
+        AudioManager.setMusic("build")
 
         -- Notify client of progress
         ThinkingRemote:FireClient(player, {
@@ -64,7 +77,18 @@ local function handleResponse(player: Player, response: table)
             text = string.format("Building %d actions...", #commands),
         })
 
+        -- Execute via CommandExecutor (internally routes through BuildAnimator
+        -- for staggered cinematic reveal of created parts)
         local results = CommandExecutor.executeBatch(commands)
+
+        -- Stop thinking cue — build is done
+        AudioManager.stopThinking()
+
+        -- Play completion vocal cue
+        AudioManager.playCue("complete")
+
+        -- Return to hub music
+        AudioManager.setMusic("hub")
 
         -- Send results to client
         ResponseRemote:FireClient(player, {
@@ -83,11 +107,18 @@ local function handleResponse(player: Player, response: table)
                 })
             end
         end
+    else
+        -- No commands — just a conversational response.
+        -- Stop thinking cue.
+        AudioManager.stopThinking()
     end
 
     -- If the response has a direct message (Worker returns 'reply', not 'message')
     local replyText = response.reply or response.message
     if replyText then
+        -- Play chat receive UI sound
+        AudioManager.playUi("chat_receive")
+
         ResponseRemote:FireClient(player, {
             type = "message",
             message = replyText,
@@ -130,6 +161,10 @@ local function init()
     -- Core modules
     Poller.init()
     ChatHandler.init()
+
+    -- Audio system
+    AudioManager.init()
+    AudioManager.setMusic("hub")
 
     -- Wire AI responses
     ChatHandler.onResponse(handleResponse)

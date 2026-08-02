@@ -11,6 +11,9 @@ local Config = require(script.Parent.Config)
 local Http = require(script.Parent.Http)
 local Poller = require(script.Parent.Poller)
 local WorldScanner = require(script.Parent.WorldScanner)
+local AudioManager = require(script.Parent.AudioManager)
+
+local Lucineer = game:GetService("ReplicatedStorage"):WaitForChild("Lucineer")
 
 local ChatHandler = {}
 
@@ -37,6 +40,21 @@ end
 function ChatHandler.processMessage(player: Player, message: string)
     print(string.format("[Lucineer] ChatHandler: %s said \"%s\"", player.Name, message))
 
+    -- Play chat send UI sound
+    AudioManager.playUi("chat_send")
+
+    -- Play acknowledgment vocal cue (Lucineer heard you)
+    AudioManager.playCue("acknowledge")
+
+    -- Show "Lucineer is thinking..." indicator on the client
+    local thinkingRemote = Lucineer:FindFirstChild("ThinkingEvent")
+    if thinkingRemote then
+        thinkingRemote:FireClient(player, {
+            thinking = true,
+            text = "Lucineer is thinking...",
+        })
+    end
+
     -- Gather world state
     local worldState = WorldScanner.scan(player)
 
@@ -58,6 +76,7 @@ function ChatHandler.processMessage(player: Player, message: string)
         local response, err = Http.post("/api/message", payload)
         if err then
             warn(string.format("[Lucineer] ChatHandler: POST /api/message failed: %s", err))
+            AudioManager.playUi("error")
             if ChatHandler._onResponse then
                 task.spawn(ChatHandler._onResponse, player, {
                     error = true,
@@ -86,6 +105,7 @@ function ChatHandler.processMessage(player: Player, message: string)
             end,
             function(jobErr: string)
                 warn(string.format("[Lucineer] ChatHandler: job %s error: %s", jobId, jobErr))
+                AudioManager.playUi("error")
                 if ChatHandler._onResponse then
                     task.spawn(ChatHandler._onResponse, player, {
                         error = true,
