@@ -146,6 +146,34 @@ r{ id = "crank", era = 0, name = "Crank", category = "simple_machine",
    techNote = "The crank-handle appeared around 200 BCE in China and Rome.",
    agentTip = "The Mechanic says: it's the opposite of a cam. Spin to push, push to spin." }
 
+r{ id = "fulcrum", era = 0, name = "Fulcrum", category = "simple_machine",
+   ingredients = { stone = 3, wood = 1 },
+   output = { type = "component", componentType = "fulcrum" },
+   description = "A pivot point for a lever. The foundation of mechanical advantage.",
+   techNote = "Moving the fulcrum closer to the load increases mechanical advantage.",
+   agentTip = "The Mechanic says: the lever gets all the credit. The fulcrum does the work." }
+
+r{ id = "axle", era = 0, name = "Axle", category = "simple_machine",
+   ingredients = { wood = 3, metal_fragment = 1 },
+   output = { type = "component", componentType = "axle" },
+   description = "A central shaft for a rotating wheel. Reduces rotational friction.",
+   techNote = "Greased bronze bearings reduce friction to near-zero rotational drag.",
+   agentTip = "The Mechanic says: the wheel is useless without the axle. They're a package deal." }
+
+r{ id = "rope", era = 0, name = "Rope", category = "simple_machine",
+   ingredients = { fiber = 3 },
+   output = { type = "component", componentType = "rope", amount = 3 },
+   description = "Twisted fibers for tension loads. Essential for pulleys and bindings.",
+   techNote = "Natural fiber ropes lose strength when wet; synthetics don't.",
+   agentTip = "The Mechanic says: you'll tie more things together than you'll ever build." }
+
+r{ id = "chisel", era = 0, name = "Chisel", category = "simple_machine",
+   ingredients = { metal_fragment = 2, wood = 1 },
+   output = { type = "component", componentType = "chisel" },
+   description = "A wedge-edged cutting tool for carving stone and wood.",
+   techNote = "A chisel is a controlled wedge — all force concentrated on one edge.",
+   agentTip = "The Mechanic says: precision wedge work. Your stone projects need this." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ERA 1: POWER TRANSMISSION (15 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -255,8 +283,43 @@ r{ id = "manometer", era = 1, name = "Manometer", category = "instrument",
    techNote = "A manometer measures pressure by the height difference of liquid columns.",
    agentTip = "The Millwright says: simple, accurate, no moving parts. The best instruments." }
 
+r{ id = "turbine_water", era = 1, name = "Water Turbine", category = "power",
+   ingredients = { metal_fragment = 6, wood = 3, axle = 1 },
+   output = { type = "component", componentType = "turbine_water" },
+   description = "An enclosed water-driven turbine. More efficient than an open waterwheel.",
+   techNote = "Pelton wheels achieve 90% efficiency by using cup-shaped buckets.",
+   agentTip = "The Millwright says: enclose the water, squeeze every drop of power." }
+
+r{ id = "turbine_steam", era = 1, name = "Steam Turbine", category = "power",
+   ingredients = { metal_fragment = 8, boiler = 1, valve = 2 },
+   output = { type = "component", componentType = "turbine_steam" },
+   description = "A turbine driven by high-pressure steam. The bridge to the electric age.",
+   techNote = "Steam turbines convert thermal energy to rotational via expanding steam.",
+   agentTip = "The Millwright says: boil water, spin blades, conquer the world." }
+
+r{ id = "boiler", era = 1, name = "Boiler", category = "fluid",
+   ingredients = { metal_fragment = 6, valve = 1, pipe = 2 },
+   output = { type = "component", componentType = "boiler" },
+   description = "A pressurized vessel that boils water to produce steam.",
+   techNote = "Boilers must handle high pressure — safety valves are mandatory.",
+   agentTip = "The Millwright says: respect the boiler. Or it will disrespect you." }
+
+r{ id = "cogwheel", era = 1, name = "Cogwheel Assembly", category = "power",
+   ingredients = { metal_fragment = 3, wooden_gear = 2 },
+   output = { type = "component", componentType = "cogwheel" },
+   description = "A precision metal gear assembly for high-torque applications.",
+   techNote = "Involute gear teeth maintain constant contact ratio during meshing.",
+   agentTip = "The Millwright says: wooden gears chatter. Metal gears sing." }
+
+r{ id = "universal_joint", era = 1, name = "Universal Joint", category = "power",
+   ingredients = { metal_fragment = 3, coupling = 1 },
+   output = { type = "component", componentType = "universal_joint" },
+   description = "A joint that allows a shaft to transmit torque at an angle.",
+   techNote = "Cardan joints introduce speed fluctuations at operating angles.",
+   agentTip = "The Millwright says: when the shafts won't line up, the U-joint saves the day." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ERA 2: ELECTRICITY (15 recipes)
+-- ERA 2: ELECTRICITY (20 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 r{ id = "generator", era = 2, name = "Generator", category = "electrical",
@@ -364,8 +427,71 @@ r{ id = "capacitor", era = 2, name = "Capacitor", category = "electrical",
    techNote = "Capacitors smooth voltage ripple and provide burst current.",
    agentTip = "The Electrician says: a tiny bucket for electricity. Fills fast, empties fast." }
 
+r{ id = "resistor", era = 2, name = "Resistor", category = "electrical",
+   ingredients = { carbon = 1, metal_fragment = 1, ceramic = 1 },
+   output = { type = "component", componentType = "resistor" },
+   description = "Limits current flow. The most basic component in electronics.",
+   techNote = "Ohm's law: V = I × R. Resistors convert excess current to heat.",
+   agentTip = "The Electrician says: without these, every LED dies instantly." }
+
+r{ id = "diode", era = 2, name = "Diode", category = "electrical",
+   ingredients = { semiconductor = 1, metal_fragment = 1 },
+   output = { type = "component", componentType = "diode" },
+   description = "Allows current in one direction only. A one-way valve for electricity.",
+   techNote = "PN junction diodes have a 0.7V forward voltage drop.",
+   agentTip = "The Electrician says: relays are slow. Diodes are instant." }
+
+r{ id = "copper_ore_refined", era = 2, name = "Refined Copper", category = "electrical",
+   ingredients = { copper_ore = 3, heating_element = 1 },
+   output = { type = "component", componentType = "copper_wire", amount = 6 },
+   description = "Smelt raw copper ore into pure copper wire stock.",
+   techNote = "Electrolytic refining produces 99.99% pure copper.",
+   agentTip = "The Electrician says: raw ore won't conduct. Purify it first." }
+
+r{ id = "voltmeter", era = 2, name = "Voltmeter", category = "instrument",
+   ingredients = { wire = 3, metal_fragment = 2, glass = 1 },
+   output = { type = "component", componentType = "voltmeter" },
+   description = "Measures electrical voltage. Essential for debugging circuits.",
+   techNote = "Ideal voltmeters have infinite internal resistance.",
+   agentTip = "The Electrician says: 'is there power?' The voltmeter answers." }
+
+r{ id = "ammeter", era = 2, name = "Ammeter", category = "instrument",
+   ingredients = { wire = 2, metal_fragment = 2, glass = 1 },
+   output = { type = "component", componentType = "ammeter" },
+   description = "Measures electrical current flowing through a circuit.",
+   techNote = "Ideal ammeters have zero internal resistance.",
+   agentTip = "The Electrician says: voltage is pressure. Current is flow. Measure both." }
+
+r{ id = "led", era = 2, name = "LED", category = "electrical",
+   ingredients = { semiconductor = 1, metal_fragment = 1, glass = 1 },
+   output = { type = "component", componentType = "led" },
+   description = "A light-emitting diode. Efficient, instant, directional light.",
+   techNote = "LEDs emit photons when electrons cross the PN junction.",
+   agentTip = "The Electrician says: the future of lighting. Uses 1/10th the power of a bulb." }
+
+r{ id = "inductor", era = 2, name = "Inductor", category = "electrical",
+   ingredients = { iron_bar = 1, copper_wire = 3 },
+   output = { type = "component", componentType = "inductor" },
+   description = "A coil that stores energy in a magnetic field. Resists current changes.",
+   techNote = "V = L × (di/dt). Inductors oppose changes in current flow.",
+   agentTip = "The Electrician says: the inductor is the capacitor's opposite. It fights change." }
+
+r{ id = "rheostat", era = 2, name = "Rheostat", category = "electrical",
+   ingredients = { resistor = 2, metal_fragment = 2, ceramic = 1 },
+   output = { type = "component", componentType = "rheostat" },
+   description = "A variable resistor. Dial in the exact resistance you need.",
+   techNote = "Rheostats use a wiper on a resistive track to vary resistance continuously.",
+   agentTip = "The Electrician says: dim the lights, throttle the motor. Adjustable resistance." }
+
+r{ id = "ground_rod", era = 2, name = "Ground Rod", category = "electrical",
+   ingredients = { metal_fragment = 3, copper_wire = 1 },
+   output = { type = "component", componentType = "ground_rod" },
+   description = "An earth connection that safely dissipates excess current. Safety first.",
+   techNote = "Grounding provides a zero-voltage reference and fault current path.",
+   agentTip = "The Electrician says: if you skip this, your house burns down. Period." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ERA 3: CONTROL SYSTEMS (15 recipes)
+-- ERA 3: CONTROL SYSTEMS (18 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 r{ id = "logic_gate_and", era = 3, name = "AND Gate", category = "control",
@@ -473,8 +599,57 @@ r{ id = "dac", era = 3, name = "Digital-to-Analog Converter", category = "contro
    techNote = "An R-2R ladder DAC uses only two resistor values.",
    agentTip = "The Logician says: numbers become voltages. Digital meets physical." }
 
+r{ id = "comparator", era = 3, name = "Comparator", category = "control",
+   ingredients = { diode = 2, resistor = 2, copper_wire = 2 },
+   output = { type = "component", componentType = "comparator" },
+   description = "Compares two voltages and outputs which is higher.",
+   techNote = "Op-amp comparators switch state when inputs cross by millivolts.",
+   agentTip = "The Logician says: 'is this more than that?' One bit of judgment." }
+
+r{ id = "oscillator", era = 3, name = "Oscillator Circuit", category = "control",
+   ingredients = { capacitor = 2, resistor = 2, simple_relay = 1 },
+   output = { type = "component", componentType = "oscillator" },
+   description = "Generates a repeating signal. Clock pulses for digital circuits.",
+   techNote = "Relaxation oscillators charge/discharge a capacitor through a resistor.",
+   agentTip = "The Logician says: tick-tock-tick-tock. The heartbeat of every machine." }
+
+r{ id = "schmitt_trigger", era = 3, name = "Schmitt Trigger", category = "control",
+   ingredients = { comparator = 1, resistor = 3 },
+   output = { type = "component", componentType = "schmitt_trigger" },
+   description = "A comparator with hysteresis — clean switching from noisy signals.",
+   techNote = "Hysteresis: different thresholds for rising vs. falling signals.",
+   agentTip = "The Logician says: no more flickering. The trigger cleans up messy inputs." }
+
+r{ id = "pid_controller", era = 3, name = "PID Controller", category = "control",
+   ingredients = { comparator = 2, capacitor = 3, resistor = 3 },
+   output = { type = "component", componentType = "pid_controller" },
+   description = "Proportional-Integral-Derivative controller. Keeps things exactly right.",
+   techNote = "PID: P reacts to present error, I integrates past error, D anticipates future.",
+   agentTip = "The Logician says: 'keep the temperature at exactly 200°.' The PID never sleeps." }
+
+r{ id = "latch", era = 3, name = "Latch Circuit", category = "control",
+   ingredients = { flip_flop = 1, logic_gate_and = 1, copper_wire = 2 },
+   output = { type = "component", componentType = "latch" },
+   description = "Stores a value until explicitly changed. A transparent memory element.",
+   techNote = "A D-latch passes input to output while enabled, holds when disabled.",
+   agentTip = "The Logician says: 'remember this number.' The latch holds it." }
+
+r{ id = "shift_register", era = 3, name = "Shift Register", category = "control",
+   ingredients = { flip_flop = 4, copper_wire = 3 },
+   output = { type = "component", componentType = "shift_register" },
+   description = "Stores and shifts multiple bits. Serial-to-parallel conversion.",
+   techNote = "74HC595 shift registers expand outputs via serial communication.",
+   agentTip = "The Logician says: push bits in one at a time, get 8 outputs. Magic." }
+
+r{ id = "voltage_comparator", era = 3, name = "Voltage Comparator", category = "sensor",
+   ingredients = { comparator = 1, resistor = 2, copper_wire = 2 },
+   output = { type = "component", componentType = "voltage_comparator" },
+   description = "Compares a sensor voltage to a threshold. Triggers on crossing.",
+   techNote = "Window comparators use two thresholds for upper/lower bound detection.",
+   agentTip = "The Logician says: 'is the voltage above X?' Yes/no. One bit." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ERA 4: PROGRAMMABLE LOGIC (15 recipes)
+-- ERA 4: PROGRAMMABLE LOGIC (18 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 r{ id = "arduino_board", era = 4, name = "Arduino Board", category = "programmable",
@@ -582,8 +757,50 @@ r{ id = "xbee_radio", era = 4, name = "XBee Radio", category = "programmable",
    techNote = "XBee ZB modules form self-healing mesh networks automatically.",
    agentTip = "The Coder says: Wi-Fi is close-range. XBee goes the distance." }
 
+r{ id = "microphone_module", era = 4, name = "Microphone Module", category = "sensor_module",
+   ingredients = { electret = 1, circuit_board = 1, copper_wire = 2 },
+   output = { type = "component", componentType = "microphone_module" },
+   description = "Electret microphone breakout for sound detection and voice input.",
+   techNote = "Electret mics need bias voltage; MAX4466 modules include preamp.",
+   agentTip = "The Coder says: the machine can hear you. STT integration starts here." }
+
+r{ id = "speaker_module", era = 4, name = "Speaker Module", category = "sensor_module",
+   ingredients = { speaker = 1, circuit_board = 1, copper_wire = 2 },
+   output = { type = "component", componentType = "speaker_module" },
+   description = "Amplified speaker for TTS output and audio feedback.",
+   techNote = "I2S DACs (e.g., MAX98357A) provide crystal-clear digital audio to speakers.",
+   agentTip = "The Coder says: the machine speaks back. Wire this up before anything else." }
+
+r{ id = "gas_sensor", era = 4, name = "Gas Sensor", category = "sensor_module",
+   ingredients = { semiconductor = 2, circuit_board = 1, copper_wire = 2 },
+   output = { type = "component", componentType = "gas_sensor" },
+   description = "Detects combustible and toxic gases. Safety first.",
+   techNote = "MQ-2 sensors detect methane, propane, CO, and smoke via resistance change.",
+   agentTip = "The Coder says: if the machine smells gas, it shuts everything down." }
+
+r{ id = "gps_module", era = 4, name = "GPS Module", category = "sensor_module",
+   ingredients = { antenna = 1, circuit_board = 1, crystal = 1 },
+   output = { type = "component", componentType = "gps_module" },
+   description = "Satellite positioning. Knows exactly where it is on the map.",
+   techNote = "GPS needs 4 satellites for 3D position fix. Accuracy: ~3m civilian.",
+   agentTip = "The Coder says: 'where am I?' The machine always knows now." }
+
+r{ id = "rfid_reader", era = 4, name = "RFID Reader", category = "sensor_module",
+   ingredients = { antenna = 1, circuit_board = 1, copper_wire = 2 },
+   output = { type = "component", componentType = "rfid_reader" },
+   description = "Reads RFID tags for identification and tracking. Touch to identify.",
+   techNote = "125kHz RFID is passive (no battery). UHF RFID reads at 10m+.",
+   agentTip = "The Coder says: tag your tools, tag your builds. Scan to identify." }
+
+r{ id = "joystick_module", era = 4, name = "Joystick Module", category = "programmable",
+   ingredients = { potentiometer = 2, switch = 1, circuit_board = 1 },
+   output = { type = "component", componentType = "joystick_module" },
+   description = "Dual-axis analog joystick with click. Precise manual control.",
+   techNote = "Two potentiometers (X/Y) plus a push button. Analog values 0-1023.",
+   agentTip = "The Coder says: when you need analog input from a human. Cranes, arms, rovers." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ERA 5: NETWORKED SYSTEMS (15 recipes)
+-- ERA 5: NETWORKED SYSTEMS (18 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 r{ id = "wireless_module", era = 5, name = "Wireless Module", category = "network",
@@ -691,8 +908,43 @@ r{ id = "data_pipeline", era = 5, name = "Data Pipeline", category = "network",
    techNote = "ETL pipelines: Extract (sensors) → Transform (process) → Load (database).",
    agentTip = "The Architect says: data goes in raw, comes out as decisions." }
 
+r{ id = "edge_compute", era = 5, name = "Edge Compute Node", category = "network",
+   ingredients = { esp32 = 2, circuit_board = 2, sd_card_module = 1 },
+   output = { type = "component", componentType = "edge_compute" },
+   description = "Processes data locally at the network edge. Faster decisions.",
+   techNote = "Edge computing reduces latency by processing near the data source.",
+   agentTip = "The Architect says: not everything needs the cloud. Process at the edge." }
+
+r{ id = "time_sync", era = 5, name = "Time Sync Server", category = "network",
+   ingredients = { esp32 = 1, rtc_module = 1, antenna = 1 },
+   output = { type = "component", componentType = "time_sync" },
+   description = "NTP-like time synchronization across the network. Everyone agrees.",
+   techNote = "NTP achieves sub-50ms sync across the public internet.",
+   agentTip = "The Architect says: every node on the same clock. Coordination starts here." }
+
+r{ id = "firewall", era = 5, name = "Network Firewall", category = "network",
+   ingredients = { esp32 = 1, circuit_board = 1, encryption_module = 1 },
+   output = { type = "component", componentType = "firewall" },
+   description = "Filters network traffic. Blocks unauthorized access to devices.",
+   techNote = "Stateful firewalls track connection state, not just packet headers.",
+   agentTip = "The Architect says: the network is open. The firewall decides who enters." }
+
+r{ id = "load_balancer", era = 5, name = "Load Balancer", category = "network",
+   ingredients = { esp32 = 2, circuit_board = 2, network_hub = 1 },
+   output = { type = "component", componentType = "load_balancer" },
+   description = "Distributes work across multiple devices. No single point of overload.",
+   techNote = "Round-robin DNS is the simplest load balancing strategy.",
+   agentTip = "The Architect says: when one node can't keep up, split the work." }
+
+r{ id = "message_queue", era = 5, name = "Message Queue", category = "network",
+   ingredients = { mqtt_broker = 1, sd_card_module = 1, esp32 = 1 },
+   output = { type = "component", componentType = "message_queue" },
+   description = "Buffers messages between devices. Reliable asynchronous delivery.",
+   techNote = "Persistent queues survive restarts by writing to disk.",
+   agentTip = "The Architect says: send now, process later. The queue waits patiently." }
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- ERA 6: AUTONOMOUS AGENTS (15 recipes)
+-- ERA 6: AUTONOMOUS AGENTS (18 recipes)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 r{ id = "agent_core", era = 6, name = "Agent Core", category = "autonomous",
@@ -799,6 +1051,34 @@ r{ id = "decision_engine", era = 6, name = "Decision Engine", category = "autono
    description = "Evaluates options and selects actions using reasoning models.",
    techNote = "Decision engines use MDPs (Markov Decision Processes) for optimal policy selection.",
    agentTip = "The Orchestrator says: this is where thinking happens. Inputs in, decision out." }
+
+r{ id = "learning_module", era = 6, name = "Learning Module", category = "autonomous",
+   ingredients = { agent_core = 1, sd_card_module = 1, circuit_board = 2 },
+   output = { type = "component", componentType = "learning_module" },
+   description = "Allows agents to improve performance over time through experience.",
+   techNote = "Reinforcement learning: agents maximize cumulative reward through exploration.",
+   agentTip = "The Orchestrator says: agents that learn from mistakes. They get better every day." }
+
+r{ id = "vision_system", era = 6, name = "Vision System", category = "autonomous",
+   ingredients = { camera = 1, esp32 = 1, circuit_board = 2 },
+   output = { type = "component", componentType = "vision_system" },
+   description = "Gives agents the ability to see and interpret their surroundings.",
+   techNote = "Edge vision: ESP32-CAM runs lightweight CNNs for object detection at 5fps.",
+   agentTip = "The Orchestrator says: agents that see. They build better when they know what's there." }
+
+r{ id = "pathfinder", era = 6, name = "Pathfinder Module", category = "autonomous",
+   ingredients = { agent_core = 1, ultrasonic_sensor = 2, circuit_board = 1 },
+   output = { type = "component", componentType = "pathfinder" },
+   description = "Calculates optimal paths through terrain. Navigation for mobile agents.",
+   techNote = "A* algorithm balances greedy search with path optimality.",
+   agentTip = "The Orchestrator says: the scout needs to get from A to B. This finds the way." }
+
+r{ id = "mission_planner", era = 6, name = "Mission Planner", category = "autonomous",
+   ingredients = { decision_engine = 1, pathfinder = 1, circuit_board = 2 },
+   output = { type = "component", componentType = "mission_planner" },
+   description = "Generates complete mission plans for agent fleets. Goals in, steps out.",
+   techNote = "HTN (Hierarchical Task Network) planners decompose goals into executable tasks.",
+   agentTip = "The Orchestrator says: give it a goal. It makes the plan. The fleet executes." }
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- LOOKUP INDICES (built at load time for fast access)
