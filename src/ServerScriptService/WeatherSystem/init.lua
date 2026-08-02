@@ -433,40 +433,41 @@ local function applyWaveDamage()
 
     local structures = CollectionService:GetTagged("Structure")
     for _, structure in ipairs(structures) do
-        if not structure:IsA("Model") or not structure.PrimaryPart then continue end
+        if structure:IsA("Model") and structure.PrimaryPart then
+            local pos = structure.PrimaryPart.Position
+            local heightDiff = math.abs(pos.Y - waterLevel)
+            if heightDiff <= STORM_CONFIG.waveDamageRadius then
 
-        local pos = structure.PrimaryPart.Position
-        local heightDiff = math.abs(pos.Y - waterLevel)
-        if heightDiff > STORM_CONFIG.waveDamageRadius then continue end
+                -- Check if the structure is reinforced
+                local isReinforced = structure:GetAttribute("Reinforced") or false
+                if not isReinforced then
+                    -- Check material of PrimaryPart
+                    local mat = structure.PrimaryPart.Material
+                    if STORM_CONFIG.reinforcedMaterials[mat.Name] then
+                        isReinforced = true
+                    end
+                end
 
-        -- Check if the structure is reinforced
-        local isReinforced = structure:GetAttribute("Reinforced") or false
-        if not isReinforced then
-            -- Check material of PrimaryPart
-            local mat = structure.PrimaryPart.Material
-            if STORM_CONFIG.reinforcedMaterials[mat.Name] then
-                isReinforced = true
+                if not isReinforced then
+                    -- Apply damage
+                    local currentHealth = structure:GetAttribute("Health")
+                    local maxHealth = structure:GetAttribute("MaxHealth")
+                    if currentHealth and maxHealth then
+                        local newHealth = math.max(0, currentHealth - STORM_CONFIG.waveDamage)
+                        structure:SetAttribute("Health", newHealth)
+
+                        if newHealth <= 0 then
+                            structure:SetAttribute("Destroyed", true)
+                            local destroyEvent = structure:FindFirstChild("OnDestroyed")
+                            if destroyEvent and destroyEvent:IsA("BindableEvent") then
+                                destroyEvent:Fire()
+                            end
+                            -- Visual: debris
+                            Effects.spawnDebris(pos)
+                        end
+                    end
+                end
             end
-        end
-
-        if isReinforced then continue end
-
-        -- Apply damage
-        local currentHealth = structure:GetAttribute("Health")
-        local maxHealth = structure:GetAttribute("MaxHealth")
-        if not currentHealth or not maxHealth then continue end
-
-        local newHealth = math.max(0, currentHealth - STORM_CONFIG.waveDamage)
-        structure:SetAttribute("Health", newHealth)
-
-        if newHealth <= 0 then
-            structure:SetAttribute("Destroyed", true)
-            local destroyEvent = structure:FindFirstChild("OnDestroyed")
-            if destroyEvent and destroyEvent:IsA("BindableEvent") then
-                destroyEvent:Fire()
-            end
-            -- Visual: debris
-            Effects.spawnDebris(pos)
         end
     end
 end

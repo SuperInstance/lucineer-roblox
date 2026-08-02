@@ -1,4 +1,3 @@
---!strict
 --[[
     SaveSystem — Slackwater Persistence Layer
     ===========================================
@@ -70,7 +69,7 @@ local legacyBuilds = {}  -- array of { playerName = string, folder = Instance, t
     Get or create the LucineerBuilds folder in workspace.
     @return Folder
 ]]
-local function ensureBuildsFolder(): Folder
+local function ensureBuildsFolder()
     local folder = Workspace:FindFirstChild("LucineerBuilds")
     if not folder then
         folder = Instance.new("Folder")
@@ -84,7 +83,7 @@ end
     Get or create the LegacyBuilds folder in workspace.
     @return Folder
 ]]
-local function ensureLegacyFolder(): Folder
+local function ensureLegacyFolder()
     local folder = Workspace:FindFirstChild("LegacyBuilds")
     if not folder then
         folder = Instance.new("Folder")
@@ -99,7 +98,7 @@ end
     @param value any
     @return string
 ]]
-local function jsonEncode(value: any): string
+local function jsonEncode(value)
     return Http.encode(value)
 end
 
@@ -108,7 +107,7 @@ end
     @param s string
     @return table?
 ]]
-local function jsonDecode(s: string): table?
+local function jsonDecode(s)
     local ok, result = pcall(Http.decode, s)
     if ok then return result end
     return nil
@@ -119,7 +118,7 @@ end
     @param color Color3
     @return string
 ]]
-local function colorToHex(color: Color3): string
+local function colorToHex(color)
     return string.format("#%02X%02X%02X",
         math.floor(color.R * 255 + 0.5),
         math.floor(color.G * 255 + 0.5),
@@ -131,7 +130,7 @@ end
     @param hex string -- "#RRGGBB" or "RRGGBB"
     @return Color3
 ]]
-local function hexToColor(hex: string): Color3
+local function hexToColor(hex)
     hex = hex:gsub("#", "")
     local r = tonumber(hex:sub(1, 2), 16) or 255
     local g = tonumber(hex:sub(3, 4), 16) or 255
@@ -144,7 +143,7 @@ end
     @param mat string?
     @return Enum.Material
 ]]
-local function parseMaterial(mat: string?): Enum.Material
+local function parseMaterial(mat)
     if not mat then return Enum.Material.SmoothPlastic end
     local ok, result = pcall(function()
         return Enum.Material[mat]
@@ -157,7 +156,7 @@ end
     @param t table
     @return Vector3
 ]]
-local function parseVector3(t: table): Vector3
+local function parseVector3(t)
     return Vector3.new(t.x or t[1] or 0, t.y or t[2] or 0, t.z or t[3] or 0)
 end
 
@@ -171,7 +170,7 @@ end
     @param data table -- data to store (will be JSON-encoded)
     @return boolean success
 ]]
-local function saveToR2(key: string, data: table): boolean
+local function saveToR2(key, data)
     local response, err = Http.post(MEMORY_URL .. "/api/save/r2/" .. key, {
         key = key,
         data = jsonEncode(data),
@@ -190,7 +189,7 @@ end
     @param key string -- R2 object key
     @return table? -- decoded data, or nil if not found / error
 ]]
-local function loadFromR2(key: string): table?
+local function loadFromR2(key)
     local response, err = Http.get(MEMORY_URL .. "/api/save/r2/" .. key)
 
     if err then
@@ -222,7 +221,7 @@ end
     @param value any -- value to store (will be JSON-encoded)
     @return boolean success
 ]]
-local function saveToD1(playerName: string, key: string, value: any): boolean
+local function saveToD1(playerName, key, value)
     local dataStr = jsonEncode(value)
     local _, err = Http.post(MEMORY_URL .. "/api/save/d1/" .. playerName .. "/" .. key, {
         player_name = playerName,
@@ -244,7 +243,7 @@ end
     @param key string
     @return any? -- decoded value, or nil if not found / error
 ]]
-local function loadFromD1(playerName: string, key: string): any?
+local function loadFromD1(playerName, key)
     local response, err = Http.get(MEMORY_URL .. "/api/save/d1/" .. playerName .. "/" .. key)
 
     if err or not response then
@@ -267,7 +266,7 @@ end
     @param part BasePart
     @return table
 ]]
-local function serializePart(part: BasePart): table
+local function serializePart(part)
     local data = {
         name = part.Name,
         className = part.ClassName,
@@ -313,7 +312,7 @@ end
     Scans for all BaseParts and collects their properties.
     @return table -- { version, timestamp, parts, lights, metadata }
 ]]
-local function serializeBuilds(): table
+local function serializeBuilds()
     local folder = ensureBuildsFolder()
     local parts = {}
     local lights = {}
@@ -363,7 +362,7 @@ end
     @param data table -- the snapshot from serializeBuilds() / R2
     @return number -- count of parts restored
 ]]
-local function deserializeBuilds(data: table): number
+local function deserializeBuilds(data)
     if not data or not data.parts then
         return 0
     end
@@ -453,7 +452,7 @@ end
     @param parts {BasePart} -- array of parts
     @return number -- score (higher = more impressive)
 ]]
-local function scoreBuild(parts: { BasePart }): number
+local function scoreBuild(parts)
     if #parts == 0 then return 0 end
 
     local materialSet = {}
@@ -492,7 +491,7 @@ end
 
     @param playerName string
 ]]
-local function createLegacyBuild(playerName: string)
+local function createLegacyBuild(playerName)
     local folder = ensureBuildsFolder()
 
     -- Collect all parts in LucineerBuilds
@@ -596,7 +595,7 @@ end
     @param playerName string
     @return boolean success
 ]]
-local function savePlayer(playerName: string): boolean
+local function savePlayer(playerName)
     local state = playerSaveState[playerName]
     if not state then
         -- Player not loaded; nothing to save
@@ -651,7 +650,7 @@ end
     @param playerName string
     @return boolean success
 ]]
-local function saveBuilds(playerName: string): boolean
+local function saveBuilds(playerName)
     local state = playerSaveState[playerName]
     if not state then return false end
 
@@ -686,7 +685,7 @@ end
     @param playerName string
     @return table? -- loaded state, or nil on total failure
 ]]
-local function loadPlayer(playerName: string): table?
+local function loadPlayer(playerName)
     -- Initialize state with defaults
     local state = {
         loaded = true,
@@ -786,8 +785,8 @@ function SaveSystem.init()
     end)
 
     -- Auto-save heartbeat: save all players every AUTOSAVE_INTERVAL seconds
-    RunService.Heartbeat:Connect(function(dt: number)
-        autosaveAccumulator += dt
+    RunService.Heartbeat:Connect(function(dt)
+        autosaveAccumulator = autosaveAccumulator + dt
         if autosaveAccumulator >= AUTOSAVE_INTERVAL then
             autosaveAccumulator = 0
             saveAll()
