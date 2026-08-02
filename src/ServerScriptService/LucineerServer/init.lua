@@ -27,6 +27,9 @@ local AchievementManager = require(script.Parent:WaitForChild("AchievementManage
 local BondSystem = require(script.Parent:WaitForChild("BondSystem"))
 local EraSystem = require(script.Parent:WaitForChild("EraSystem"))
 local PowerGrid = require(script.Parent:WaitForChild("PowerGrid"))
+local SaveSystem = require(script.Parent:WaitForChild("SaveSystem"))
+local TutorialSystem = require(script.Parent:WaitForChild("TutorialSystem"))
+local WeatherSystem = require(script.Parent:WaitForChild("WeatherSystem"))
 
 -- Create RemoteEvents for client ↔ server communication
 local function createRemote(name: string): RemoteEvent
@@ -179,8 +182,9 @@ local function init()
     BondSystem.init()
     EraSystem.init()
     PowerGrid.init()
-
-    -- TODO: WeatherSystem.init() once WeatherSystem is implemented
+    SaveSystem.init()
+    TutorialSystem.init()
+    WeatherSystem.init()
 
     -- Wire AI responses
     ChatHandler.onResponse(handleResponse)
