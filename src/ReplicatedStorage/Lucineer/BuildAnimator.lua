@@ -66,6 +66,13 @@ local CONFIG = {
     DROP_EASING_STYLE = Enum.EasingStyle.Bounce,
     DROP_EASING_DIRECTION = Enum.EasingDirection.Out,
 
+    -- Rise-in trajectory (parts emerge from below the ground / sea level)
+    RISE_HEIGHT = 8,
+
+    -- Cascade style: elastic scale for wave-ripple feel
+    CASCADE_EASING_STYLE = Enum.EasingStyle.Elastic,
+    CASCADE_EASING_DIRECTION = Enum.EasingDirection.Out,
+
     -- Staggered streaming (legacy constant; overridden by getStagger when BPM is known)
     STAGGER_DELAY = DEFAULT_STAGGER,
 
@@ -78,6 +85,13 @@ local CONFIG = {
     LANDING_PARTICLE_SPEED = 4,
     LANDING_PARTICLE_SPREAD = 0.15,
     LANDING_PARTICLE_SIZE = 0.08,
+
+    -- Weather style: dust/spray burst on each part appearance
+    WEATHER_DUST_COUNT = 14,
+    WEATHER_DUST_LIFETIME = 0.7,
+    WEATHER_DUST_SPEED = 2.5,
+    WEATHER_DUST_SIZE = 0.18,
+    WEATHER_DUST_SPREAD = 0.3,
 
     -- Completion burst (last part in batch)
     COMPLETION_PARTICLE_COUNT = 28,
@@ -461,6 +475,71 @@ local function createParticleBurst(
     return nil
 end
 
+--[[
+    Create a one-shot dust/spray particle burst for the "weather" animation style.
+
+    Similar to createParticleBurst but uses wider spread, slower/larger particles,
+    and desaturated colors to simulate dust, debris, or sea spray.
+
+    @param position Vector3 -- world position
+    @param color Color3 -- base color (will be desaturated for dust look)
+]]
+local function createWeatherBurst(position: Vector3, color: Color3)
+    local ok, err = pcall(function()
+        local carrier = Instance.new("Part")
+        carrier.Name = "WeatherCarrier"
+        carrier.Size = Vector3.new(0.1, 0.1, 0.1)
+        carrier.Position = position
+        carrier.Transparency = 1
+        carrier.CanCollide = false
+        carrier.CanQuery = false
+        carrier.Anchored = true
+        carrier.Parent = workspace
+
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = carrier
+
+        local dustH, dustS, dustV = color:ToHSV()
+        local dustColor = Color3.fromHSV(dustH, dustS * 0.4, dustV * 0.7)
+
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Name = "WeatherEmitter"
+        emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        emitter.Color = ColorSequence.new(dustColor)
+        emitter.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, CONFIG.WEATHER_DUST_SIZE * 0.5),
+            NumberSequenceKeypoint.new(1, CONFIG.WEATHER_DUST_SIZE * 1.5),
+        })
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        emitter.Lifetime = NumberRange.new(
+            CONFIG.WEATHER_DUST_LIFETIME * 0.5,
+            CONFIG.WEATHER_DUST_LIFETIME
+        )
+        emitter.Speed = NumberRange.new(
+            CONFIG.WEATHER_DUST_SPEED * (1 - CONFIG.WEATHER_DUST_SPREAD),
+            CONFIG.WEATHER_DUST_SPEED * (1 + CONFIG.WEATHER_DUST_SPREAD)
+        )
+        emitter.SpreadAngle = Vector2.new(60, 60)
+        emitter.Rotation = NumberRange.new(0, 360)
+        emitter.Rate = 0
+        emitter.EmitCount = CONFIG.WEATHER_DUST_COUNT
+        emitter.Parent = attachment
+
+        emitter:Emit(CONFIG.WEATHER_DUST_COUNT)
+
+        Debris:AddItem(carrier, CONFIG.WEATHER_DUST_LIFETIME + 0.5)
+    end)
+
+    if not ok then
+        warn(string.format("[Lucineer] BuildAnimator: weather burst failed: %s", tostring(err)))
+    end
+
+    return nil
+end
+
 ----------------------------------------------------------------
 -- PUBLIC API
 ----------------------------------------------------------------
@@ -507,15 +586,26 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?, 
         if animStyle == "drop" then
             startPos = landingPos + Vector3.new(0, CONFIG.DROP_HEIGHT, 0)
             part.CFrame = CFrame.new(startPos) * (part.CFrame - part.CFrame.Position)
+        elseif animStyle == "rise" then
+            startPos = landingPos + Vector3.new(0, -CONFIG.RISE_HEIGHT, 0)
+            part.CFrame = CFrame.new(startPos) * (part.CFrame - part.CFrame.Position)
         end
 
         local completed = false
 
-        -- Size tween (Back ease — subtle bounce)
+        -- Per-style size easing: cascade uses elastic for a wave-ripple feel
+        local sizeEasing = CONFIG.SIZE_EASING_STYLE
+        local sizeEasingDir = CONFIG.SIZE_EASING_DIRECTION
+        if animStyle == "cascade" then
+            sizeEasing = CONFIG.CASCADE_EASING_STYLE
+            sizeEasingDir = CONFIG.CASCADE_EASING_DIRECTION
+        end
+
+        -- Size tween
         local sizeInfo = TweenInfo.new(
             CONFIG.PART_TWEEN_TIME,
-            CONFIG.SIZE_EASING_STYLE,
-            CONFIG.SIZE_EASING_DIRECTION
+            sizeEasing,
+            sizeEasingDir
         )
         local sizeTween = TweenService:Create(part, sizeInfo, { Size = targetSize })
 
@@ -535,6 +625,13 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?, 
                 CONFIG.DROP_EASING_DIRECTION
             )
             positionTween = TweenService:Create(part, dropInfo, { Position = landingPos })
+        elseif animStyle == "rise" then
+            local riseInfo = TweenInfo.new(
+                CONFIG.PART_TWEEN_TIME * 1.1,
+                Enum.EasingStyle.Quad,
+                Enum.EasingDirection.Out
+            )
+            positionTween = TweenService:Create(part, riseInfo, { Position = landingPos })
         end
 
         -- Landing effects when the size tween completes
