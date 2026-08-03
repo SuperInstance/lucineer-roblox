@@ -47,6 +47,12 @@
         },
         "CinematicController": {
           "$path": "src/ReplicatedStorage/Lucineer/CinematicController.lua"
+        },
+        "FilterGate": {
+          "$path": "src/ReplicatedStorage/Lucineer/FilterGate.lua"
+        },
+        "BeatClock": {
+          "$path": "src/ReplicatedStorage/Lucineer/BeatClock.lua"
         }
       }
     },
@@ -138,6 +144,12 @@
         "$className": "Folder",
         "init": {
           "$path": "src/ServerScriptService/VibeCodeExecutor/init.lua"
+        }
+      },
+      "OnboardingSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/OnboardingSystem/init.lua"
         }
       }
     },

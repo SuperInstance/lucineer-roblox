@@ -82,9 +82,15 @@ ResponseRemote.OnClientEvent:Connect(function(data: table)
         end
 
         if succeeded > 0 and failed == 0 then
-            UIManager.displayChatResponse(string.format("Done! I built %d action(s) for you.", succeeded))
+            -- "Done! I built %d action(s)" is dead. Lucineer speaks in voice.
+            local VoiceLines = require(Lucineer:WaitForChild("VoiceLines"))
+            VoiceLines.init()
+            local line = VoiceLines.getWeighted()
+            UIManager.displayChatResponse(line)
         elseif succeeded > 0 and failed > 0 then
-            UIManager.displayChatResponse(string.format("Built %d, but %d failed. I'll do better next time!", succeeded, failed))
+            local VoiceLines = require(Lucineer:WaitForChild("VoiceLines"))
+            VoiceLines.init()
+            UIManager.displayChatResponse(VoiceLines.getByTrigger("wrong") or "Some of it held. Some didn't.")
         elseif failed > 0 then
             UIManager.displayChatResponse("Hmm, I ran into trouble building that. Try describing it differently?")
         end

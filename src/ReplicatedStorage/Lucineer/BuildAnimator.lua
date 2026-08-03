@@ -38,6 +38,11 @@ local BuildAnimator = {}
 -- CONFIG
 ----------------------------------------------------------------
 
+-- The legacy stagger constant. Kept for backward compatibility.
+-- New code should use BuildAnimator.getStagger(bpm) instead, which
+-- derives the stagger from the musical 32nd-note grid.
+local DEFAULT_STAGGER = 0.08
+
 local CONFIG = {
     -- Per-part fade/scale tween
     PART_TWEEN_TIME = 0.3,
@@ -46,8 +51,8 @@ local CONFIG = {
     TRANS_EASING_STYLE = Enum.EasingStyle.Quad,
     TRANS_EASING_DIRECTION = Enum.EasingDirection.Out,
 
-    -- Staggered streaming
-    STAGGER_DELAY = 0.08,
+    -- Staggered streaming (legacy constant; overridden by getStagger when BPM is known)
+    STAGGER_DELAY = DEFAULT_STAGGER,
 
     -- Performance: cap concurrent in-flight animations
     MAX_CONCURRENT_ANIMATIONS = 30,
@@ -810,6 +815,77 @@ function BuildAnimator.getConfig(): table
         copy[key] = value
     end
     return copy
+end
+
+----------------------------------------------------------------
+-- MUSICAL TIMING — 32nd-note grid
+----------------------------------------------------------------
+
+--[[
+    Calculate the per-part stagger from the current BPM.
+
+    The Grand Plan says: "BuildAnimator re-derived onto the 32nd-note
+    grid — at Allegro 120 that is ~62ms, at Andante 90 ~83ms; the tuned
+    '0.08s stagger' stops being a constant and becomes a musical duration."
+
+    32nd note = beat / 8 (eight 32nd notes per quarter note)
+    At 120 BPM: 60/120/8 = 0.0625s per 32nd note
+    At 90 BPM:  60/90/8  = 0.083s
+    At 72 BPM:  60/72/8  = 0.104s
+
+    This means the build's visual rhythm is derived from the shared clock,
+    not hardcoded. When the tempo rises (EnergyAdapter detects player
+    excitement), parts land faster — the yard quickens with the player.
+
+    @param bpm number — current BPM from BeatClock
+    @return number — seconds between part reveals (one 32nd note)
+]]
+function BuildAnimator.getStagger(bpm: number): number
+    if typeof(bpm) ~= "number" or bpm <= 0 then
+        return DEFAULT_STAGGER
+    end
+    return 60.0 / (bpm * 8)
+end
+
+--[[
+    Animate a batch with musical timing derived from BPM.
+
+    Same as animateBatch() but uses getStagger(bpm) for the inter-part
+    delay instead of the legacy CONFIG.STAGGER_DELAY constant.
+
+    @param parts { BasePart } -- array of parts to reveal
+    @param bpm number -- current BPM from BeatClock
+    @param centerPosition Vector3? -- build center for completion burst
+    @param player Player? -- for camera focus (client-side)
+]]
+function BuildAnimator.animateBatchInTime(
+    parts: { BasePart },
+    bpm: number,
+    centerPosition: Vector3?,
+    player: Player?
+)
+    if not parts or #parts == 0 then return end
+
+    local stagger = BuildAnimator.getStagger(bpm)
+    local count = #parts
+    centerPosition = centerPosition or parts[1].Position
+
+    if player and RunService:IsClient() then
+        BuildAnimator._focusCamera(centerPosition, player)
+    end
+
+    for i, part in ipairs(parts) do
+        local delay = (i - 1) * stagger
+
+        task.delay(delay, function()
+            local isLast = (i == count)
+            if isLast then
+                BuildAnimator._animatePartWithCompletion(part, centerPosition)
+            else
+                BuildAnimator.animatePart(part)
+            end
+        end)
+    end
 end
 
 return BuildAnimator
