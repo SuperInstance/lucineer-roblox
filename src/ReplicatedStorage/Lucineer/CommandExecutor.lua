@@ -1,8 +1,10 @@
 --[[
     Lucineer Command Executor
     Receives structured build commands from the AI and executes them in the workspace.
-    Supports: createPart, createModel, deletePart, movePart, addLight, addSound,
-              addParticle, addScript (Studio-only), setTerrain, sendMessage
+    Supports: createPart, createWedge, createCylinder, createSphere, createModel,
+              createSurface, createGroup, deletePart, movePart, addLight, addSound,
+              addParticle, addScript (Studio-only), setTerrain, sendMessage,
+              markUnfinished
 
     GAP #9 Fixes:
       9a: runLua removed entirely — loadstring is unsafe and disabled by default.
@@ -140,19 +142,13 @@ local inBatchMode = false
 ----------------------------------------------------------------
 
 --[[
-    createPart: Create a new BasePart in the workspace.
-    Expects: { name, position, size, material, color, anchored, transparency, shape }
-
-    When called inside executeBatch(), the part is created in a pre-animation
-    state (parented but invisible) and deferred to BuildAnimator.animateBatch().
-    When called standalone via execute(), it animates immediately.
+    Helper: apply common BasePart properties and batch-animation tracking.
+    Used by createPart, createWedge, createCylinder, createSphere.
+    The caller is responsible for parenting the returned part.
 
     GAP #10d: Increments _partsCreated and updates WorldScanner build count cache.
 ]]
-function CommandExecutor.createPart(params: { [string]: any }): Instance
-    local folder = ensureFolder()
-    local part = Instance.new("Part")
-
+local function prepareBasePart(part: BasePart, params: { [string]: any }): BasePart
     part.Name = params.name or "LucineerPart"
 
     -- Store the TARGET values — BuildAnimator will tween to these
@@ -187,20 +183,12 @@ function CommandExecutor.createPart(params: { [string]: any }): Instance
         part.Reflectance = params.reflectance
     end
 
-    if params.shape then
-        local ok = pcall(function()
-            part.Shape = Enum.PartType[params.shape]
-        end)
-    end
-
     -- Pre-animation state: if we're in batch mode, make the part invisible
     -- and tiny so it's ready for BuildAnimator.animateBatch() to reveal it.
     if inBatchMode then
         part.Transparency = 1
         part.Size = Vector3.new(0.1, 0.1, 0.1)
     end
-
-    part.Parent = folder
 
     -- GAP #10d: Track build count
     CommandExecutor._partsCreated += 1
@@ -217,8 +205,154 @@ function CommandExecutor.createPart(params: { [string]: any }): Instance
         table.insert(batchCreatedParts, part)
     end
 
-    print(string.format("[Lucineer] CommandExecutor: created Part '%s' at %s", part.Name, tostring(targetPosition)))
     return part
+end
+
+--[[
+    createPart: Create a new BasePart in the workspace.
+    Expects: { name, position, size, material, color, anchored, transparency, shape }
+
+    When called inside executeBatch(), the part is created in a pre-animation
+    state (parented but invisible) and deferred to BuildAnimator.animateBatch().
+    When called standalone via execute(), it animates immediately.
+]]
+function CommandExecutor.createPart(params: { [string]: any }): Instance
+    local folder = ensureFolder()
+    local part = Instance.new("Part")
+
+    prepareBasePart(part, params)
+
+    if params.shape then
+        local ok = pcall(function()
+            part.Shape = Enum.PartType[params.shape]
+        end)
+    end
+
+    part.Parent = folder
+
+    print(string.format("[Lucineer] CommandExecutor: created Part '%s' at %s", part.Name, tostring(part.Position)))
+    return part
+end
+
+--[[
+    createWedge: Create a WedgePart for ramps, roofs, and door wedges.
+    Expects: { name, position, size, material, color, anchored, transparency, rotation }
+]]
+function CommandExecutor.createWedge(params: { [string]: any }): Instance
+    local folder = ensureFolder()
+    local part = Instance.new("WedgePart")
+
+    prepareBasePart(part, params)
+    part.Parent = folder
+
+    print(string.format("[Lucineer] CommandExecutor: created Wedge '%s' at %s", part.Name, tostring(part.Position)))
+    return part
+end
+
+--[[
+    createCylinder: Create a cylinder-shaped part for columns and pipes.
+    Expects: { name, position, size, material, color, anchored, transparency, rotation }
+]]
+function CommandExecutor.createCylinder(params: { [string]: any }): Instance
+    local folder = ensureFolder()
+    local part = Instance.new("Part")
+
+    local ok = pcall(function()
+        part.Shape = Enum.PartType.Cylinder
+    end)
+
+    prepareBasePart(part, params)
+    part.Parent = folder
+
+    print(string.format("[Lucineer] CommandExecutor: created Cylinder '%s' at %s", part.Name, tostring(part.Position)))
+    return part
+end
+
+--[[
+    createSphere: Create a sphere-shaped part for decorative elements.
+    Expects: { name, position, size, material, color, anchored, transparency, rotation }
+]]
+function CommandExecutor.createSphere(params: { [string]: any }): Instance
+    local folder = ensureFolder()
+    local part = Instance.new("Part")
+
+    local ok = pcall(function()
+        part.Shape = Enum.PartType.Ball
+    end)
+
+    prepareBasePart(part, params)
+    part.Parent = folder
+
+    print(string.format("[Lucineer] CommandExecutor: created Sphere '%s' at %s", part.Name, tostring(part.Position)))
+    return part
+end
+
+--[[
+    createSurface: Apply a material/color/texture change to an existing part.
+    Expects: { name, material, color, transparency, texture, face }
+      - texture: optional rbxassetid://... string; adds a Decal on the given face
+      - face:    optional face name (Front, Back, Top, Bottom, Left, Right)
+]]
+function CommandExecutor.createSurface(params: { [string]: any }): Instance?
+    local part = findPartByName(params.name)
+    if not part or not part:IsA("BasePart") then
+        warn(string.format("[Lucineer] CommandExecutor: createSurface — '%s' not found or not a Part", tostring(params.name)))
+        return nil
+    end
+
+    if params.material then
+        part.Material = parseMaterial(params.material)
+    end
+    if params.color then
+        part.Color = parseColor(params.color)
+    end
+    if params.transparency ~= nil then
+        part.Transparency = params.transparency
+    end
+
+    if params.texture then
+        local face = params.face or "Front"
+        local normalId = Enum.NormalId[face] or Enum.NormalId.Front
+        local decal = Instance.new("Decal")
+        decal.Name = params.decalName or "LucineerSurfaceDecal"
+        decal.Texture = params.texture
+        decal.Face = normalId
+        decal.Color3 = if params.decalColor then parseColor(params.decalColor) else Color3.new(1, 1, 1)
+        decal.Transparency = params.decalTransparency or 0
+        decal.Parent = part
+    end
+
+    print(string.format("[Lucineer] CommandExecutor: applied surface to '%s'", part.Name))
+    return part
+end
+
+--[[
+    createGroup: Parent multiple existing parts under a Model for organization.
+    Expects: { name, partNames = { "PartA", "PartB", ... } }
+]]
+function CommandExecutor.createGroup(params: { [string]: any }): Model
+    local folder = ensureFolder()
+    local model = Instance.new("Model")
+    model.Name = params.name or "LucineerGroup"
+    model.Parent = folder
+
+    for _, partName in ipairs(params.partNames or {}) do
+        local part = findPartByName(partName)
+        if part then
+            part.Parent = model
+        else
+            warn(string.format("[Lucineer] CommandExecutor: createGroup — part '%s' not found", tostring(partName)))
+        end
+    end
+
+    -- Set a PrimaryPart for the group if any part exists inside it.
+    local primary = model:FindFirstChildWhichIsA("BasePart")
+    if primary then
+        model.PrimaryPart = primary
+    end
+
+    print(string.format("[Lucineer] CommandExecutor: created Group '%s' with %d children", model.Name, #model:GetChildren()))
+    return model
 end
 
 --[[
@@ -595,8 +729,16 @@ function CommandExecutor.markUnfinished(params: { [string]: any }): { [string]: 
     part:SetAttribute("Lucineer_OriginalTransparency", part.Transparency)
     CollectionService:AddTag(part, "LucineerUnfinished")
 
-    -- Make the unfinished part semi-transparent so it reads as a deliberate gap.
+    -- Make the unfinished part semi-transparent and add a SelectionBox highlight
+    -- so the player can clearly see which piece is left for them.
     part.Transparency = 0.5
+
+    local highlight = Instance.new("SelectionBox")
+    highlight.Name = "LucineerUnfinishedHighlight"
+    highlight.Color3 = Color3.fromRGB(255, 180, 60)
+    highlight.LineThickness = 0.05
+    highlight.Adornee = part
+    highlight.Parent = part
 
     -- Optional particle shimmer to draw the eye
     local attachment = Instance.new("Attachment")
@@ -638,7 +780,12 @@ end
 -- GAP #9a: runLua removed from the command map.
 local commandMap: { [string]: ({ [string]: any }) -> any } = {
     createPart = CommandExecutor.createPart,
+    createWedge = CommandExecutor.createWedge,
+    createCylinder = CommandExecutor.createCylinder,
+    createSphere = CommandExecutor.createSphere,
     createModel = CommandExecutor.createModel,
+    createSurface = CommandExecutor.createSurface,
+    createGroup = CommandExecutor.createGroup,
     deletePart = CommandExecutor.deletePart,
     movePart = CommandExecutor.movePart,
     addLight = CommandExecutor.addLight,
