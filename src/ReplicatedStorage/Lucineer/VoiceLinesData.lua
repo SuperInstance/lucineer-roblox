@@ -72,4 +72,11 @@ return {
     { category = "IDLE",       trigger = "waiting",         line = "I'm waiting. Patiently." },
     { category = "IDLE",       trigger = "bored",           line = "Boredom is the enemy of creation." },
     { category = "IDLE",       trigger = "idle",            line = "In idleness, inspiration strikes." },
+
+    -- BRAIN_REPLY (5) — in-voice completion lines after a build
+    { category = "BRAIN_REPLY", trigger = "unfinished",     line = "There. One piece still waits for your hand." },
+    { category = "BRAIN_REPLY", trigger = "left undone",    line = "I built it, but I left the last touch open." },
+    { category = "BRAIN_REPLY", trigger = "gap",            line = "See the gap? That's where you finish the thought." },
+    { category = "BRAIN_REPLY", trigger = "not done",       line = "A build is never finished — only paused." },
+    { category = "BRAIN_REPLY", trigger = "one waiting",    line = "Mostly done. The last part is yours to place." },
 }

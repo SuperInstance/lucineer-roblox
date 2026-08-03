@@ -26,14 +26,15 @@ VoiceLines._initialized = false
 -- Category weights for weighted random selection.
 -- Common categories appear more frequently; rare ones less so.
 local CATEGORY_WEIGHTS = {
-    GREETING    = 20,
-    TEMPLATES   = 20,
-    FIRST_BUILD = 12,
-    FAREWELL    = 10,
-    IDLE        = 10,
-    ARGUMENTS   = 8,
-    IMPRESSED   = 4,   -- rare
-    REFUSAL     = 3,   -- rarest
+    GREETING     = 20,
+    TEMPLATES    = 20,
+    FIRST_BUILD  = 12,
+    FAREWELL     = 10,
+    IDLE         = 10,
+    BRAIN_REPLY  = 8,
+    ARGUMENTS    = 8,
+    IMPRESSED    = 4,   -- rare
+    REFUSAL      = 3,   -- rarest
 }
 
 --[[

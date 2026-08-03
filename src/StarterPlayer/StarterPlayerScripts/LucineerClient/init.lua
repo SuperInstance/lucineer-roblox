@@ -76,13 +76,9 @@ ResponseRemote.OnClientEvent:Connect(function(data: { [string]: any })
             end
         end
 
-        if succeeded > 0 and failed == 0 then
-            -- "Done! I built %d action(s)" is dead. Lucineer speaks in voice.
-            local VoiceLines = require(Lucineer:WaitForChild("VoiceLines"))
-            VoiceLines.init()
-            local line = VoiceLines.getWeighted()
-            UIManager.displayChatResponse(line)
-        elseif succeeded > 0 and failed > 0 then
+        -- Server sends the brain reply (markUnfinished / VoiceLines BRAIN_REPLY)
+        -- for successful builds, so the client only handles mixed/failure cases.
+        if succeeded > 0 and failed > 0 then
             local VoiceLines = require(Lucineer:WaitForChild("VoiceLines"))
             VoiceLines.init()
             UIManager.displayChatResponse(VoiceLines.getByTrigger("wrong") or "Some of it held. Some didn't.")

@@ -28,12 +28,14 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 local Terrain = game:GetService("Workspace").Terrain
 local InsertService = game:GetService("InsertService")
 
 local BuildAnimator = require(script.Parent.BuildAnimator)
 local WorldScanner = require(script.Parent.WorldScanner)
 local BeatClock = require(script.Parent.BeatClock)
+local VoiceLines = require(script.Parent.VoiceLines)
 
 local CommandExecutor = {}
 
@@ -532,6 +534,95 @@ function CommandExecutor.sendMessage(params: { [string]: any }): { [string]: any
 end
 
 --[[
+    markUnfinished: pick one part from a build and mark it as a deliberate gap.
+    Expects: { partName?, partsList? }
+      - partName:   optional specific part to mark
+      - partsList:  optional array of BaseParts to choose from (defaults to all
+                    BaseParts under LucineerBuilds)
+
+    Sets Transparency = 0.5, tags the part with CollectionService tag
+    "LucineerUnfinished", and sets attribute Lucineer_Unfinished = true.
+    Returns a sendMessage-style result so Lucineer can say what's left undone.
+
+    CHARACTER_BIBLE §6: every build should leave one deliberate gap.
+]]
+function CommandExecutor.markUnfinished(params: { [string]: any }): { [string]: any }?
+    VoiceLines.init()
+
+    local candidates: { BasePart } = {}
+    if params.partName then
+        local part = findPartByName(params.partName)
+        if part and part:IsA("BasePart") then
+            table.insert(candidates, part)
+        end
+    elseif type(params.partsList) == "table" and #params.partsList > 0 then
+        for _, p in ipairs(params.partsList) do
+            if typeof(p) == "Instance" and p:IsA("BasePart") then
+                table.insert(candidates, p)
+            end
+        end
+    else
+        local folder = ensureFolder()
+        for _, child in ipairs(folder:GetDescendants()) do
+            if child:IsA("BasePart") then
+                table.insert(candidates, child)
+            end
+        end
+    end
+
+    if #candidates == 0 then
+        warn("[Lucineer] CommandExecutor: markUnfinished — no build parts found")
+        return nil
+    end
+
+    -- Pick a deliberate gap. Prefer a part that isn't already marked.
+    local part: BasePart
+    local unmarked: { BasePart } = {}
+    for _, p in ipairs(candidates) do
+        if not p:GetAttribute("Lucineer_Unfinished") then
+            table.insert(unmarked, p)
+        end
+    end
+    if #unmarked > 0 then
+        part = unmarked[math.random(1, #unmarked)]
+    else
+        part = candidates[math.random(1, #candidates)]
+    end
+
+    -- Mark the part with both an attribute and a CollectionService tag so other
+    -- systems can query the deliberate gap.
+    part:SetAttribute("Lucineer_Unfinished", true)
+    part:SetAttribute("Lucineer_OriginalTransparency", part.Transparency)
+    CollectionService:AddTag(part, "LucineerUnfinished")
+
+    -- Make the unfinished part semi-transparent so it reads as a deliberate gap.
+    part.Transparency = 0.5
+
+    -- Optional particle shimmer to draw the eye
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "UnfinishedAttachment"
+    attachment.Position = Vector3.new(0, 0, 0)
+    attachment.Parent = part
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = "LucineerUnfinishedParticles"
+    emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    emitter.Rate = 8
+    emitter.Lifetime = NumberRange.new(1, 2)
+    emitter.Speed = NumberRange.new(0.2, 0.6)
+    emitter.Size = NumberSequence.new(0.3, 0.8)
+    emitter.Color = ColorSequence.new(Color3.fromRGB(255, 180, 60))
+    emitter.Transparency = NumberSequence.new(0.3, 0.7)
+    emitter.Parent = attachment
+
+    local line = VoiceLines.get("BRAIN_REPLY") or "One piece still waits."
+    local message = string.format("%s — %s is left undone.", line, part.Name)
+
+    print(string.format("[Lucineer] CommandExecutor: markUnfinished — '%s' left as deliberate gap", part.Name))
+    return CommandExecutor.sendMessage({ message = message })
+end
+
+--[[
     GAP #9a: runLua REMOVED.
     loadstring requires ServerScriptService.LoadStringEnabled which is off by default
     and should stay off. Arbitrary server-side code execution from HTTP responses
@@ -556,6 +647,7 @@ local commandMap: { [string]: ({ [string]: any }) -> any } = {
     addScript = CommandExecutor.addScript,
     setTerrain = CommandExecutor.setTerrain,
     sendMessage = CommandExecutor.sendMessage,
+    markUnfinished = CommandExecutor.markUnfinished,
 }
 
 --[[
@@ -624,7 +716,7 @@ end
     @param onProgress ((current: number, total: number, result: any) -> ())? -- optional progress callback
     @return { { [string]: any } } -- array of { success, result, error } per command
 ]]
-function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgress: ((number, number, any) -> ())?): { { [string]: any } }
+function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgress: ((number, number, any) -> ())?, style: string?): { { [string]: any } }
     local results: { { [string]: any } } = {}
 
     -- Enter batch mode — created parts will be collected for deferred animation
@@ -657,17 +749,34 @@ function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgres
     inBatchMode = false
 
     -- If we collected parts during the batch, animate them with staggered timing
+    local unfinishedResult = nil
     if #batchCreatedParts > 0 then
         local partCount = #batchCreatedParts
 
         -- BuildAnimator reads the target Size/Transparency from attributes,
         -- sorts parts spatially, and runs the reveal curve.
-        BuildAnimator.animateBatch(batchCreatedParts)
+        BuildAnimator.animateBatch(batchCreatedParts, nil, nil, nil, style)
+
+        -- CHARACTER_BIBLE §6: every build leaves one deliberate gap.
+        -- Pick a part from the freshly created batch so the player always has
+        -- one piece left to finish.
+        unfinishedResult = CommandExecutor.markUnfinished({ partsList = batchCreatedParts })
 
         -- Clear the tracking list
         table.clear(batchCreatedParts)
 
         print(string.format("[Lucineer] CommandExecutor: animated batch of %d parts via BuildAnimator", partCount))
+    end
+
+    -- Append the unfinished marker as a command result so the server can
+    -- route Lucineer's "what's left undone" line to the player.
+    if unfinishedResult then
+        table.insert(results, {
+            index = #results + 1,
+            type = "markUnfinished",
+            success = true,
+            result = unfinishedResult,
+        })
     end
 
     return results

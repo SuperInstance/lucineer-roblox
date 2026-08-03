@@ -369,13 +369,14 @@ end
     "distance" radiates from the build center in waves.
     "none" leaves the array unchanged.
 ]]
-local function sortPartsSpatially(parts: { BasePart }, center: Vector3): { BasePart }
-    if CONFIG.BATCH_SORT_MODE == "none" then
+local function sortPartsSpatially(parts: { BasePart }, center: Vector3, mode: string?): { BasePart }
+    local sortMode = mode or CONFIG.BATCH_SORT_MODE
+    if sortMode == "none" then
         return parts
     end
 
     local sorted = table.clone(parts)
-    if CONFIG.BATCH_SORT_MODE == "distance" then
+    if sortMode == "distance" then
         table.sort(sorted, function(a, b)
             return (a.Position - center).Magnitude < (b.Position - center).Magnitude
         end)
@@ -660,8 +661,13 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?, 
 
                 -- Placement sound
                 BuildAnimator.playPlacementSound(partMaterial, landingPos)
+
+                -- Weather dust/spray burst
+                if animStyle == "weather" then
+                    createWeatherBurst(landingPos, partColor)
+                end
             end
-        end)
+        end) -- sizeTween.Completed
 
         -- Safety net: if the tween never fires (e.g. part destroyed),
         -- restore target values after a timeout so the part is still visible.
@@ -729,7 +735,8 @@ function BuildAnimator.animateBatch(
     partsOrCommands: any,
     centerPosition: Vector3?,
     player: Player?,
-    executor: any?
+    executor: any?,
+    style: string?
 )
     if not partsOrCommands or typeof(partsOrCommands) ~= "table" then
         warn("[Lucineer] BuildAnimator.animateBatch: expected a table, got " .. typeof(partsOrCommands))
@@ -777,8 +784,16 @@ function BuildAnimator.animateBatch(
     local _, _, boundsCenter, boundsSize = calculateBounds(parts)
     centerPosition = centerPosition or boundsCenter
 
+    -- Resolve animation style (per-build override falls back to global CONFIG)
+    local animStyle = style or CONFIG.ANIMATION_STYLE
+
     -- Sort parts into a cinematic build order (foundation first, then up/out)
-    parts = sortPartsSpatially(parts, centerPosition)
+    -- Cascade style forces distance-based ordering for the outward wave
+    if animStyle == "cascade" then
+        parts = sortPartsSpatially(parts, centerPosition, "distance")
+    else
+        parts = sortPartsSpatially(parts, centerPosition)
+    end
 
     -- Camera focus (client-side, only if player is within range)
     if player and RunService:IsClient() then
@@ -787,18 +802,43 @@ function BuildAnimator.animateBatch(
 
     -- Stagger each part's reveal, driven by the musical clock
     local stagger = getCurrentStagger()
-    for i, part in ipairs(parts) do
-        local delay = (i - 1) * stagger
 
-        task.delay(delay, function()
-            local isLast = (i == count)
+    if animStyle == "cascade" then
+        -- Cascade: distance-proportional delays so the build radiates outward
+        -- like a wave expanding at constant speed from the center.
+        local distances = {}
+        local maxDist = 0
+        for i, part in ipairs(parts) do
+            local d = (part.Position - centerPosition).Magnitude
+            distances[i] = d
+            if d > maxDist then maxDist = d end
+        end
+        maxDist = math.max(maxDist, 0.01)
 
-            if isLast then
-                BuildAnimator._animatePartWithCompletion(part, centerPosition)
-            else
-                BuildAnimator.animatePart(part)
-            end
-        end)
+        local waveTime = count * stagger
+        for i, part in ipairs(parts) do
+            local delay = (distances[i] / maxDist) * waveTime
+
+            task.delay(delay, function()
+                if i == count then
+                    BuildAnimator._animatePartWithCompletion(part, centerPosition, animStyle)
+                else
+                    BuildAnimator.animatePart(part, nil, animStyle)
+                end
+            end)
+        end
+    else
+        for i, part in ipairs(parts) do
+            local delay = (i - 1) * stagger
+
+            task.delay(delay, function()
+                if i == count then
+                    BuildAnimator._animatePartWithCompletion(part, centerPosition, animStyle)
+                else
+                    BuildAnimator.animatePart(part, nil, animStyle)
+                end
+            end)
+        end
     end
 end
 
@@ -810,14 +850,14 @@ end
     @param part BasePart -- the last part in the batch
     @param centerPosition Vector3 -- center of the build for the completion burst
 ]]
-function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition: Vector3)
+function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition: Vector3, style: string?)
     if not part or not part:IsA("BasePart") then return end
 
     local targetSize, targetTrans = readTargetAttributes(part)
     local partColor = part.Color
     local partMaterial = part.Material
     local landingPos = part.Position
-    local animStyle = CONFIG.ANIMATION_STYLE
+    local animStyle = style or CONFIG.ANIMATION_STYLE
 
     acquireSlot(function()
         -- Snap to invisible / tiny
@@ -837,16 +877,36 @@ function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition
                 ),
                 { Position = landingPos }
             )
+        elseif animStyle == "rise" then
+            local startPos = landingPos + Vector3.new(0, -CONFIG.RISE_HEIGHT, 0)
+            part.CFrame = CFrame.new(startPos) * (part.CFrame - part.CFrame.Position)
+            positionTween = TweenService:Create(
+                part,
+                TweenInfo.new(
+                    CONFIG.PART_TWEEN_TIME * 1.1,
+                    Enum.EasingStyle.Quad,
+                    Enum.EasingDirection.Out
+                ),
+                { Position = landingPos }
+            )
         end
 
         local completed = false
+
+        -- Per-style size easing: cascade uses elastic for a wave-ripple feel
+        local sizeEasing = CONFIG.SIZE_EASING_STYLE
+        local sizeEasingDir = CONFIG.SIZE_EASING_DIRECTION
+        if animStyle == "cascade" then
+            sizeEasing = CONFIG.CASCADE_EASING_STYLE
+            sizeEasingDir = CONFIG.CASCADE_EASING_DIRECTION
+        end
 
         local sizeTween = TweenService:Create(
             part,
             TweenInfo.new(
                 CONFIG.PART_TWEEN_TIME,
-                CONFIG.SIZE_EASING_STYLE,
-                CONFIG.SIZE_EASING_DIRECTION
+                sizeEasing,
+                sizeEasingDir
             ),
             { Size = targetSize }
         )
@@ -886,6 +946,11 @@ function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition
 
                 -- Placement sound
                 BuildAnimator.playPlacementSound(partMaterial, landingPos)
+
+                -- Weather dust/spray burst
+                if animStyle == "weather" then
+                    createWeatherBurst(landingPos, partColor)
+                end
 
                 -- COMPLETION BURST — bigger, multi-colored, at build center
                 task.wait(0.05)
@@ -1169,33 +1234,63 @@ function BuildAnimator.animateBatchInTime(
     parts: { BasePart },
     bpm: number,
     centerPosition: Vector3?,
-    player: Player?
+    player: Player?,
+    style: string?
 )
     if not parts or #parts == 0 then return end
 
     local stagger = BuildAnimator.getStagger(bpm)
     local count = #parts
+    local animStyle = style or CONFIG.ANIMATION_STYLE
 
     local _, _, boundsCenter, boundsSize = calculateBounds(parts)
     centerPosition = centerPosition or boundsCenter
 
-    parts = sortPartsSpatially(parts, centerPosition)
+    if animStyle == "cascade" then
+        parts = sortPartsSpatially(parts, centerPosition, "distance")
+    else
+        parts = sortPartsSpatially(parts, centerPosition)
+    end
 
     if player and RunService:IsClient() then
         BuildAnimator._focusCamera(centerPosition, player, boundsSize)
     end
 
-    for i, part in ipairs(parts) do
-        local delay = (i - 1) * stagger
+    if animStyle == "cascade" then
+        -- Cascade: distance-proportional delays so the build radiates outward
+        local distances = {}
+        local maxDist = 0
+        for i, part in ipairs(parts) do
+            local d = (part.Position - centerPosition).Magnitude
+            distances[i] = d
+            if d > maxDist then maxDist = d end
+        end
+        maxDist = math.max(maxDist, 0.01)
 
-        task.delay(delay, function()
-            local isLast = (i == count)
-            if isLast then
-                BuildAnimator._animatePartWithCompletion(part, centerPosition)
-            else
-                BuildAnimator.animatePart(part)
-            end
-        end)
+        local waveTime = count * stagger
+        for i, part in ipairs(parts) do
+            local delay = (distances[i] / maxDist) * waveTime
+
+            task.delay(delay, function()
+                if i == count then
+                    BuildAnimator._animatePartWithCompletion(part, centerPosition, animStyle)
+                else
+                    BuildAnimator.animatePart(part, nil, animStyle)
+                end
+            end)
+        end
+    else
+        for i, part in ipairs(parts) do
+            local delay = (i - 1) * stagger
+
+            task.delay(delay, function()
+                if i == count then
+                    BuildAnimator._animatePartWithCompletion(part, centerPosition, animStyle)
+                else
+                    BuildAnimator.animatePart(part, nil, animStyle)
+                end
+            end)
+        end
     end
 end
 

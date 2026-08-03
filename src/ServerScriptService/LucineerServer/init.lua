@@ -237,27 +237,8 @@ local function handleResponse(player: Player, response: { [string]: any })
             results = results,
         })
 
-        -- GAP #8: Contextual completion message with build count.
-        -- Replaces generic "Done!" with count-aware, in-voice messages.
-        local function completionMessage(commandCount: number): string
-            local messages = {
-                "There. %d pieces placed.",
-                "Built — %d parts fitted and set.",
-                "That's %d pieces. Not bad.",
-            }
-            return string.format(messages[math.random(#messages)], commandCount)
-        end
-
-        -- If the response doesn't already have a reply/message, send a
-        -- count-aware completion message in Lucineer's voice.
-        if not (response.reply or response.message) then
-            ResponseRemote:FireClient(player, {
-                type = "message",
-                message = filterFor(completionMessage(#commands), player),
-            })
-        end
-
-        -- If there's a sendMessage command, extract and display it.
+        -- If there's a sendMessage command (including the automatic
+        -- markUnfinished message from CHARACTER_BIBLE §6), extract and display it.
         -- Commands are envelopes: { type = "sendMessage", params = { message = ... } }.
         -- The execute() result for sendMessage contains { message = ... }.
         for i, result in ipairs(results) do
