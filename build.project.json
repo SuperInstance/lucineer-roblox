@@ -1,0 +1,59 @@
+{
+  "name": "Lucineer",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Lucineer": {
+        "$className": "Folder",
+        "Config": { "$path": "src/modules/ReplicatedStorage_Lucineer_Config.lua" },
+        "Http": { "$path": "src/modules/ReplicatedStorage_Lucineer_Http.lua" },
+        "Poller": { "$path": "src/modules/ReplicatedStorage_Lucineer_Poller.lua" },
+        "ChatHandler": { "$path": "src/modules/ReplicatedStorage_Lucineer_ChatHandler.lua" },
+        "CommandExecutor": { "$path": "src/modules/ReplicatedStorage_Lucineer_CommandExecutor.lua" },
+        "WorldScanner": { "$path": "src/modules/ReplicatedStorage_Lucineer_WorldScanner.lua" },
+        "UIManager": { "$path": "src/modules/ReplicatedStorage_Lucineer_UIManager.lua" },
+        "AudioManager": { "$path": "src/modules/ReplicatedStorage_Lucineer_AudioManager.lua" },
+        "BuildAnimator": { "$path": "src/modules/ReplicatedStorage_Lucineer_BuildAnimator.lua" },
+        "VibeCoder": { "$path": "src/modules/ReplicatedStorage_Lucineer_VibeCoder.lua" },
+        "VibeCoderDialogue": { "$path": "src/modules/ReplicatedStorage_Lucineer_VibeCoderDialogue.lua" },
+        "VoiceLines": { "$path": "src/modules/ReplicatedStorage_Lucineer_VoiceLines.lua" },
+        "VoiceLinesData": { "$path": "src/modules/ReplicatedStorage_Lucineer_VoiceLinesData.lua" },
+        "CinematicController": { "$path": "src/modules/ReplicatedStorage_Lucineer_CinematicController.lua" },
+        "FilterGate": { "$path": "src/modules/ReplicatedStorage_Lucineer_FilterGate.lua" },
+        "BeatClock": { "$path": "src/modules/ReplicatedStorage_Lucineer_BeatClock.lua" }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "LucineerServer": { "$path": "src/modules/ServerScriptService_LucineerServer_init.lua" },
+      "ServerConfig": { "$path": "src/modules/ServerScriptService_LucineerServer_ServerConfig.lua" },
+      "NPCManager": { "$path": "src/modules/ServerScriptService_NPCManager_init.lua" },
+      "AchievementManager": { "$path": "src/modules/ServerScriptService_AchievementManager_init.lua" },
+      "BondSystem": { "$path": "src/modules/ServerScriptService_BondSystem_init.lua" },
+      "EraSystem": { "$path": "src/modules/ServerScriptService_EraSystem_init.lua" },
+      "CraftingSystem": { "$path": "src/modules/ServerScriptService_EraSystem_CraftingSystem.lua" },
+      "Recipes": { "$path": "src/modules/ServerScriptService_EraSystem_Recipes.lua" },
+      "SaveSystem": { "$path": "src/modules/ServerScriptService_SaveSystem_init.lua" },
+      "TutorialSystem": { "$path": "src/modules/ServerScriptService_TutorialSystem_init.lua" },
+      "WeatherSystem": { "$path": "src/modules/ServerScriptService_WeatherSystem_init.lua" },
+      "WeatherEffects": { "$path": "src/modules/ServerScriptService_WeatherSystem_Effects.lua" },
+      "PowerGrid": { "$path": "src/modules/ServerScriptService_PowerGrid_init.lua" },
+      "PowerMechanical": { "$path": "src/modules/ServerScriptService_PowerGrid_Mechanical.lua" },
+      "PowerVisualization": { "$path": "src/modules/ServerScriptService_PowerGrid_Visualization.lua" },
+      "WorldGenerator": { "$path": "src/modules/ServerScriptService_WorldGenerator_init.lua" },
+      "WorldConfig": { "$path": "src/modules/ServerScriptService_WorldGenerator_Config.lua" },
+      "Resources": { "$path": "src/modules/ServerScriptService_WorldGenerator_Resources.lua" },
+      "TideSystem": { "$path": "src/modules/ServerScriptService_WorldGenerator_TideSystem.lua" },
+      "VibeCodeExecutor": { "$path": "src/modules/ServerScriptService_VibeCodeExecutor_init.lua" },
+      "OnboardingSystem": { "$path": "src/modules/ServerScriptService_OnboardingSystem_init.lua" }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "LucineerClient": { "$path": "src/modules/StarterPlayer_StarterPlayerScripts_LucineerClient_init.lua" }
+      }
+    }
+  }
+}

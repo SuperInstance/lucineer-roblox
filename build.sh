@@ -1,78 +1,55 @@
 #!/usr/bin/env bash
 # ============================================================
-# Lucineer Roblox — Build Script
+# Lucineer Roblox — Build Script (Rojo 7.7.0)
 # ============================================================
 # Builds the .rbxlx place file from src/ using Rojo.
 #
 # OUTPUT: ../vibe-world/lucineer-built.rbxlx
 #
+# Rojo 7.x has a known issue: if $path traverses directories that
+# share names with Roblox Instance types (ServerScriptService, etc.),
+# Rojo auto-mounts them as Instances instead of following the path.
+# This script works around it by copying source to a flat structure.
+#
 # PREREQUISITES:
-#   Rojo must be installed. Install with:
-#     cargo install rojo --version 7.5.1
-#   (Rust/Cargo required: https://rustup.rs)
-#
-#   Or download a prebuilt binary from:
-#     https://github.com/rojo-rbx/rojo/releases
-#
-#   For live-sync during development (requires Rojo Studio plugin):
-#     rojo serve default.project.json
-#
-# USAGE:
-#   ./build.sh              # Build to ../vibe-world/lucineer-built.rbxlx
-#   ./build.sh /custom/path # Build to custom output path
-#   ./build.sh --serve      # Start live sync server (port 34872)
+#   Rojo 7.7+ installed at ~/.local/bin/rojo or in PATH
+#   Install: curl -sL https://github.com/rojo-rbx/rojo/releases/download/v7.7.0/rojo-7.7.0-linux-x86_64.zip -o /tmp/rojo.zip && unzip /tmp/rojo.zip -d ~/.local/bin/
 # ============================================================
 
-set -euo pipefail
+set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUILD_DIR="/tmp/lucineer-rojo-build"
+OUTPUT="${SRC_DIR}/../vibe-world/lucineer-built.rbxlx"
 
-PROJECT_FILE="default.project.json"
-DEFAULT_OUTPUT="../vibe-world/lucineer-built.rbxlx"
-
-# ─── Check for rojo ───────────────────────────────────────────
-
-if ! command -v rojo &>/dev/null; then
-    echo "❌ Rojo is not installed."
-    echo ""
-    echo "Install options:"
-    echo "  1. cargo install rojo --version 7.5.1"
-    echo "  2. Download from https://github.com/rojo-rbx/rojo/releases"
-    echo ""
-    echo "Then re-run this script."
+# Find rojo
+ROJO=$(which rojo 2>/dev/null || echo "$HOME/.local/bin/rojo")
+if [ ! -x "$ROJO" ]; then
+    echo "ERROR: Rojo not found. Install with:"
+    echo "  curl -sL https://github.com/rojo-rbx/rojo/releases/download/v7.7.0/rojo-7.7.0-linux-x86_64.zip -o /tmp/rojo.zip"
+    echo "  unzip /tmp/rojo.zip -d ~/.local/bin/"
     exit 1
 fi
 
-ROJO_VERSION=$(rojo --version 2>&1 || echo "unknown")
-echo "🔧 Using Rojo: $ROJO_VERSION"
+echo "=== Lucineer Build ==="
+echo "Rojo: $($ROJO --version)"
+echo "Source: $SRC_DIR/src"
 
-# ─── Handle subcommands ───────────────────────────────────────
+# Prepare flat build directory
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR/src/modules"
 
-if [[ "${1:-}" == "--serve" ]]; then
-    echo "🚀 Starting Rojo live-sync server..."
-    echo "   Connect from Studio using the Rojo plugin."
-    exec rojo serve "$PROJECT_FILE"
-fi
+# Copy all Lua files flat
+find "$SRC_DIR/src" -name "*.lua" | while read f; do
+    flat=$(echo "$f" | sed "s|$SRC_DIR/src/||; s|/|_|g")
+    cp "$f" "$BUILD_DIR/src/modules/$flat"
+done
 
-# ─── Build ────────────────────────────────────────────────────
+# Copy the project file
+cp "$SRC_DIR/build.project.json" "$BUILD_DIR/default.project.json"
 
-OUTPUT_PATH="${1:-$DEFAULT_OUTPUT}"
-
-# Create output directory if it doesn't exist
-OUTPUT_DIR="$(dirname "$OUTPUT_PATH")"
-mkdir -p "$OUTPUT_DIR"
-
-echo "📦 Building..."
-echo "   Project: $PROJECT_FILE"
-echo "   Output:  $OUTPUT_PATH"
-echo ""
-
-rojo build "$PROJECT_FILE" -o "$OUTPUT_PATH"
-
-echo ""
-echo "✅ Build complete: $OUTPUT_PATH"
-echo ""
-echo "To use in Roblox Studio:"
-echo "  1. Open the .rbxlx file in Studio"
-echo "  2. Or use 'rojo serve' for live-sync development"
+# Build
+echo "Building..."
+cd "$BUILD_DIR"
+"$ROJO" build -o "$OUTPUT"
+echo "=== Built: $OUTPUT ($(du -h "$OUTPUT" | cut -f1)) ==="
