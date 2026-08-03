@@ -11,7 +11,10 @@
 
     Usage:
         local FilterGate = require(ReplicatedStorage.Lucineer.FilterGate)
-        local filtered = FilterGate.filterFor(modelText, player.UserId)
+        -- For AI-generated broadcast text (signs, NPCs, global displays):
+        --   Pass the authoring player's UserId if a player triggered it,
+        --   or a configured server UserId for pure AI output.
+        local filtered = FilterGate.filterFor(modelText, authorUserId)
         if filtered then
             UIManager.displayChatResponse(filtered)
         else
@@ -24,50 +27,61 @@ local TextService = game:GetService("TextService")
 local FilterGate = {}
 
 --[[
-    Filter a string for display to a specific player.
+    Filter a string for broadcast display (non-chat).
 
     Calls Roblox TextService:FilterStringAsync, which performs the
     platform-standard text moderation pass. On success, returns the
-    filtered string. On ANY error — HTTP failure, timeout, malformed
-    input — returns nil, meaning "display nothing."
+    filtered string suitable for broadcast to all players. On ANY error
+    — HTTP failure, timeout, malformed input — returns nil, meaning
+    "display nothing."
 
     The contract is simple: never return the unfiltered text.
     If the filter breaks, the string doesn't show. That's fail-closed.
 
-    @param text string — the AI-generated text to filter
-    @param playerId number — the UserId of the player who will see it
+    BUG FIX (BUG-F2): The parameter was documented as "the player who
+    will see it" (the viewer/recipient), but FilterStringAsync expects
+    the AUTHOR's UserId — the player who created or triggered the text.
+    For AI-generated text with no human author, pass the UserId of the
+    player whose request triggered the generation (this gives Roblox
+    the correct filtering context based on account age/settings).
+    If truly no triggering player exists, pass a configured server UserId.
+
+    @param text string — the text to filter
+    @param authorUserId number — UserId of the player who authored or
+        triggered this text (NOT the viewer). FilterStringAsync uses
+        this to apply age-appropriate filtering.
     @return string? — the filtered string, or nil on any failure
 ]]
-function FilterGate.filterFor(text: string, playerId: number): string?
+function FilterGate.filterFor(text: string, authorUserId: number): string?
     if type(text) ~= "string" or text == "" then
         return nil
     end
 
-    if typeof(playerId) ~= "number" or playerId <= 0 then
+    if typeof(authorUserId) ~= "number" or authorUserId <= 0 then
         return nil
     end
 
     local ok, filterResult = pcall(function()
-        return TextService:FilterStringAsync(text, playerId)
+        return TextService:FilterStringAsync(text, authorUserId)
     end)
 
     if not ok then
         -- Filter failed — fail closed. No unfiltered text reaches the player.
-        warn(string.format("[FilterGate] FilterStringAsync failed for player %d: %s",
-            playerId, tostring(filterResult)))
+        warn(string.format("[FilterGate] FilterStringAsync failed for author %d: %s",
+            authorUserId, tostring(filterResult)))
         return nil
     end
 
     -- GetNonChatStringForBroadcastAsync is the correct method for
     -- non-chat displayed text (UI labels, notifications, etc.).
-    -- For chat messages, use GetChatForUserAsync instead.
+    -- For chat messages, use filterForChat instead.
     local ok2, filteredText = pcall(function()
         return filterResult:GetNonChatStringForBroadcastAsync()
     end)
 
     if not ok2 then
-        warn(string.format("[FilterGate] GetNonChatStringForBroadcastAsync failed for player %d: %s",
-            playerId, tostring(filteredText)))
+        warn(string.format("[FilterGate] GetNonChatStringForBroadcastAsync failed for author %d: %s",
+            authorUserId, tostring(filteredText)))
         return nil
     end
 
