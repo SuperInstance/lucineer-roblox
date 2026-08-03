@@ -26,6 +26,27 @@
         },
         "UIManager": {
           "$path": "src/ReplicatedStorage/Lucineer/UIManager.lua"
+        },
+        "AudioManager": {
+          "$path": "src/ReplicatedStorage/Lucineer/AudioManager.lua"
+        },
+        "BuildAnimator": {
+          "$path": "src/ReplicatedStorage/Lucineer/BuildAnimator.lua"
+        },
+        "VibeCoder": {
+          "$path": "src/ReplicatedStorage/Lucineer/VibeCoder.lua"
+        },
+        "VibeCoderDialogue": {
+          "$path": "src/ReplicatedStorage/Lucineer/VibeCoderDialogue.lua"
+        },
+        "VoiceLines": {
+          "$path": "src/ReplicatedStorage/Lucineer/VoiceLines.lua"
+        },
+        "VoiceLinesData": {
+          "$path": "src/ReplicatedStorage/Lucineer/VoiceLinesData.lua"
+        },
+        "CinematicController": {
+          "$path": "src/ReplicatedStorage/Lucineer/CinematicController.lua"
         }
       }
     },
@@ -34,6 +55,90 @@
       "LucineerServer": {
         "$className": "Script",
         "$path": "src/ServerScriptService/LucineerServer/init.lua"
+      },
+      "NPCManager": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/NPCManager/init.lua"
+        }
+      },
+      "AchievementManager": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/AchievementManager/init.lua"
+        }
+      },
+      "BondSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/BondSystem/init.lua"
+        }
+      },
+      "EraSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/EraSystem/init.lua"
+        },
+        "CraftingSystem": {
+          "$path": "src/ServerScriptService/EraSystem/CraftingSystem.lua"
+        },
+        "Recipes": {
+          "$path": "src/ServerScriptService/EraSystem/Recipes.lua"
+        }
+      },
+      "SaveSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/SaveSystem/init.lua"
+        }
+      },
+      "TutorialSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/TutorialSystem/init.lua"
+        }
+      },
+      "WeatherSystem": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/WeatherSystem/init.lua"
+        },
+        "Effects": {
+          "$path": "src/ServerScriptService/WeatherSystem/Effects.lua"
+        }
+      },
+      "PowerGrid": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/PowerGrid/init.lua"
+        },
+        "Mechanical": {
+          "$path": "src/ServerScriptService/PowerGrid/Mechanical.lua"
+        },
+        "Visualization": {
+          "$path": "src/ServerScriptService/PowerGrid/Visualization.lua"
+        }
+      },
+      "WorldGenerator": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/WorldGenerator/init.lua"
+        },
+        "Config": {
+          "$path": "src/ServerScriptService/WorldGenerator/Config.lua"
+        },
+        "Resources": {
+          "$path": "src/ServerScriptService/WorldGenerator/Resources.lua"
+        },
+        "TideSystem": {
+          "$path": "src/ServerScriptService/WorldGenerator/TideSystem.lua"
+        }
+      },
+      "VibeCodeExecutor": {
+        "$className": "Folder",
+        "init": {
+          "$path": "src/ServerScriptService/VibeCodeExecutor/init.lua"
+        }
       }
     },
     "StarterPlayer": {
