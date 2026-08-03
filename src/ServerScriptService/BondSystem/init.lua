@@ -542,13 +542,23 @@ function BondSystem.init()
     VoiceLines.init()
 
     Players.PlayerAdded:Connect(function(player)
-        -- Reset session state
+        -- Reset session state.
+        -- BUG FIX (BUG-S1): Do NOT overwrite lastSeen here — onPlayerJoin()
+        -- reads it to check for >24h return bonus. If we set it to os.time()
+        -- now, the return check always sees ~0 seconds elapsed (dead code).
+        -- getData() initializes lastSeen to os.time() for NEW players, which
+        -- is correct (they've never been seen before, so no return bonus).
+        -- For returning players, the persisted lastSeen from D1 is loaded by
+        -- loadBond() and must survive until onPlayerJoin() reads it.
         local data = getData(player.Name)
         data.sessionFirstBuild = false
-        data.lastSeen = os.time()
 
-        -- Check for return-after-absence (handled in onPlayerJoin)
+        -- Load persisted bond data from D1 (restores lastSeen for returning players)
         loadBond(player.Name)
+
+        -- Now safe to check return-after-absence — lastSeen still holds the
+        -- previous session's value (or os.time() for brand-new players).
+        BondSystem.onPlayerJoin(player.Name)
     end)
 
     Players.PlayerRemoving:Connect(function(player)
