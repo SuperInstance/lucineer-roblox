@@ -2,8 +2,18 @@
     Lucineer Command Executor
     Receives structured build commands from the AI and executes them in the workspace.
     Supports: createPart, createModel, deletePart, movePart, addLight, addSound,
-              addScript, setTerrain, sendMessage
-    (runLua removed — loadstring is unsafe and disabled by default)
+              addScript (Studio-only), setTerrain, sendMessage
+
+    GAP #9 Fixes:
+      9a: runLua removed entirely — loadstring is unsafe and disabled by default.
+      9b: addScript restricted to Studio-only with RunService:IsStudio() guard.
+      9c: setTerrain uses FillBlock (CFrame-based) instead of deprecated FillRegion.
+          Terrain materials validated against allowed set.
+      9e: All `table` type annotations replaced with `{ [string]: any }`.
+
+    GAP #10 Fix:
+      10d: Maintains _partsCreated counter — increments on each createPart,
+           updates WorldScanner cache. No more full-tree recount.
 
     INTEGRATION: BuildAnimator
     ───────────────────────────────────────────────
@@ -17,12 +27,18 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local Terrain = game:GetService("Workspace").Terrain
 local InsertService = game:GetService("InsertService")
 
 local BuildAnimator = require(script.Parent.BuildAnimator)
+local WorldScanner = require(script.Parent.WorldScanner)
 
 local CommandExecutor = {}
+
+-- GAP #10d: Build count counter — incremented on each createPart,
+-- synced to WorldScanner cache so quickScan costs nothing.
+CommandExecutor._partsCreated = 0
 
 --[[
     Container folder for Lucineer-created instances, so we can track and manage them.
@@ -44,7 +60,7 @@ end
 --[[
     Helper: find a part by name in the workspace or LucineerBuilds folder.
     @param name string
-    @return BasePart?
+    @return Instance?
 ]]
 local function findPartByName(name: string): Instance?
     -- Check LucineerBuilds first
@@ -57,16 +73,16 @@ end
 
 --[[
     Helper: parse a position table {x, y, z} into Vector3
-    @param pos table
+    @param pos { [string]: any }
     @return Vector3
 ]]
-local function parseVector3(pos: table): Vector3
+local function parseVector3(pos: { [string]: any }): Vector3
     return Vector3.new(pos.x or pos[1] or 0, pos.y or pos[2] or 0, pos.z or pos[3] or 0)
 end
 
 --[[
     Helper: parse a color from hex string "#RRGGBB" or {r, g, b} (0-255)
-    @param color string | table
+    @param color any
     @return Color3
 ]]
 local function parseColor(color: any): Color3
@@ -86,7 +102,7 @@ end
 
 --[[
     Parse a material name into Enum.Material.
-    @param mat string
+    @param mat string?
     @return Enum.Material
 ]]
 local function parseMaterial(mat: string?): Enum.Material
@@ -96,6 +112,15 @@ local function parseMaterial(mat: string?): Enum.Material
     end)
     return ok and result or Enum.Material.SmoothPlastic
 end
+
+-- GAP #9c: Allowed terrain materials for setTerrain validation.
+local TERRAIN_MATERIALS = {
+    Grass = true, Rock = true, Sand = true, Water = true, Snow = true,
+    Mud = true, Slate = true, Ice = true, Ground = true, Asphalt = true,
+    Basalt = true, CrackedLava = true, GlacialIce = true, LeafyGrass = true,
+    Limestone = true, Marble = true, Pavement = true, Plaster = true,
+    Salt = true, Sandstone = true, WoodPlanks = true,
+}
 
 ----------------------------------------------------------------
 -- BATCH TRACKING
@@ -118,8 +143,10 @@ local inBatchMode = false
     When called inside executeBatch(), the part is created in a pre-animation
     state (parented but invisible) and deferred to BuildAnimator.animateBatch().
     When called standalone via execute(), it animates immediately.
+
+    GAP #10d: Increments _partsCreated and updates WorldScanner build count cache.
 ]]
-function CommandExecutor.createPart(params: table): Instance
+function CommandExecutor.createPart(params: { [string]: any }): Instance
     local folder = ensureFolder()
     local part = Instance.new("Part")
 
@@ -152,6 +179,10 @@ function CommandExecutor.createPart(params: table): Instance
 
     part.Parent = folder
 
+    -- GAP #10d: Track build count
+    CommandExecutor._partsCreated += 1
+    WorldScanner.setBuildCount(CommandExecutor._partsCreated)
+
     -- Track for batch animation
     if inBatchMode then
         -- Store the target values on the part so BuildAnimator knows what to tween to.
@@ -171,7 +202,7 @@ end
     createModel: Create a simple grouped model from multiple parts.
     Expects: { name, parts = { {name, position, size, ...}, ... } }
 ]]
-function CommandExecutor.createModel(params: table): Model
+function CommandExecutor.createModel(params: { [string]: any }): Model
     local folder = ensureFolder()
     local model = Instance.new("Model")
     model.Name = params.name or "LucineerModel"
@@ -191,10 +222,15 @@ end
     deletePart: Remove a part by name.
     Expects: { name }
 ]]
-function CommandExecutor.deletePart(params: table): boolean
+function CommandExecutor.deletePart(params: { [string]: any }): boolean
     local part = findPartByName(params.name)
     if part then
         part:Destroy()
+        -- GAP #10d: Decrement build count
+        if CommandExecutor._partsCreated > 0 then
+            CommandExecutor._partsCreated -= 1
+            WorldScanner.setBuildCount(CommandExecutor._partsCreated)
+        end
         print(string.format("[Lucineer] CommandExecutor: deleted '%s'", params.name))
         return true
     end
@@ -206,7 +242,7 @@ end
     movePart: Move a part to a new position.
     Expects: { name, position }
 ]]
-function CommandExecutor.movePart(params: table): boolean
+function CommandExecutor.movePart(params: { [string]: any }): boolean
     local part = findPartByName(params.name)
     if part and part:IsA("BasePart") then
         part.Position = parseVector3(params.position)
@@ -219,9 +255,9 @@ end
 
 --[[
     addLight: Add a light source to the workspace.
-    Expects: { name, type ("Point"|"Spot"|"Surface"), position, range, brightness, color }
+    Expects: { name, type ("Point"|"Spot"|"Surface"), position, range, brightness, color, parent }
 ]]
-function CommandExecutor.addLight(params: table): Instance
+function CommandExecutor.addLight(params: { [string]: any }): Instance
     local folder = ensureFolder()
 
     -- Accept both "type" and "lightType" from generators
@@ -272,7 +308,7 @@ end
     addSound: Add a Sound object to the workspace.
     Expects: { name, soundId, position, volume, looped, pitch }
 ]]
-function CommandExecutor.addSound(params: table): Instance
+function CommandExecutor.addSound(params: { [string]: any }): Instance
     local folder = ensureFolder()
     local parent: Instance
 
@@ -307,10 +343,19 @@ function CommandExecutor.addSound(params: table): Instance
 end
 
 --[[
-    addScript: Add a Script or LocalScript to the workspace.
-    Expects: { name, source, type ("Script"|"LocalScript"), parent (path string or "workspace") }
+    GAP #9b: addScript — Studio-only.
+    Script.Source is only assignable from plugins and the command bar (Studio).
+    At runtime in a published game, this raises an error. Guard with RunService:IsStudio().
+    Expects: { name, source, type ("Script"|"LocalScript"), parent }
 ]]
-function CommandExecutor.addScript(params: table): Instance
+function CommandExecutor.addScript(params: { [string]: any }): Instance?
+    -- GAP #9b: Script.Source is not assignable from runtime scripts.
+    -- Only allow in Studio where plugins/command bar can write it.
+    if not RunService:IsStudio() then
+        warn("[Lucineer] CommandExecutor: addScript is Studio-only (Script.Source is not assignable at runtime)")
+        return nil
+    end
+
     local folder = ensureFolder()
     local scriptType = params.type or "Script"
     local scriptInstance
@@ -338,31 +383,36 @@ function CommandExecutor.addScript(params: table): Instance
 end
 
 --[[
-    setTerrain: Modify terrain cells.
-    Expects: { position, size, material ("Water"|"Grass"|"Rock"|etc.), action ("fill"|"clear") }
+    GAP #9c: setTerrain — uses FillBlock instead of deprecated FillRegion.
+    FillBlock takes a CFrame and Vector3 size, requiring no grid alignment.
+    Terrain materials are validated against the allowed set.
+    Expects: { position, size, material, action ("fill"|"clear") }
 ]]
-function CommandExecutor.setTerrain(params: table): boolean
-    local regionSize = parseVector3(params.size or { x = 16, y = 1, z = 16 })
+function CommandExecutor.setTerrain(params: { [string]: any }): boolean
+    local size = parseVector3(params.size or { x = 16, y = 1, z = 16 })
     local center = parseVector3(params.position or { x = 0, y = 0, z = 0 })
 
-    local regionStart = center - regionSize / 2
-    local regionEnd = center + regionSize / 2
-
-    local region = Region3.new(regionStart, regionEnd)
-    local resolution = 4 -- terrain cell size
-
     local action = params.action or "fill"
-    local material = parseMaterial(params.material or "Grass")
+    local matName = params.material or "Grass"
 
+    local material: Enum.Material
     if action == "clear" then
-        Terrain:FillRegion(region, resolution, Enum.Material.Air)
-        print(string.format("[Lucineer] CommandExecutor: cleared terrain at %s", tostring(center)))
+        material = Enum.Material.Air
     else
-        Terrain:FillRegion(region, resolution, material)
-        print(string.format("[Lucineer] CommandExecutor: filled terrain (%s) at %s, size %s",
-            tostring(material), tostring(center), tostring(regionSize)))
+        -- GAP #9c: Validate terrain materials against the allowed set
+        if not TERRAIN_MATERIALS[matName] then
+            warn(string.format("[Lucineer] setTerrain: '%s' is not a valid terrain material, defaulting to Grass", matName))
+            matName = "Grass"
+        end
+        material = parseMaterial(matName)
     end
 
+    -- GAP #9c: FillBlock (CFrame-based) replaces deprecated FillRegion.
+    -- No grid alignment needed — CFrame handles positioning automatically.
+    Terrain:FillBlock(CFrame.new(center), size, material)
+
+    print(string.format("[Lucineer] CommandExecutor: %s terrain (%s) at %s, size %s",
+        action, tostring(material), tostring(center), tostring(size)))
     return true
 end
 
@@ -371,8 +421,8 @@ end
     Expects: { message, targetPlayer? }
     Returns the message data so the caller (server) can route it to UIManager.
 ]]
-function CommandExecutor.sendMessage(params: table): table
-    local result = {
+function CommandExecutor.sendMessage(params: { [string]: any }): { [string]: any }
+    local result: { [string]: any } = {
         type = "sendMessage",
         message = params.message or "",
         targetPlayer = params.targetPlayer,
@@ -382,11 +432,11 @@ function CommandExecutor.sendMessage(params: table): table
 end
 
 --[[
-    runLua: DISABLED (BUG #9)
-    loadstring is disabled by default on Roblox servers and is unsafe for
-    production use. This command is removed from the command map and should
-    not be re-enabled. If dynamic behavior is needed, use a whitelist of
-    parameterized behaviors instead of arbitrary source strings.
+    GAP #9a: runLua REMOVED.
+    loadstring requires ServerScriptService.LoadStringEnabled which is off by default
+    and should stay off. Arbitrary server-side code execution from HTTP responses
+    is unsafe. If dynamic behavior is needed, use a whitelist of parameterized
+    behaviors instead of source strings.
 ]]
 
 ----------------------------------------------------------------
@@ -394,7 +444,8 @@ end
 ----------------------------------------------------------------
 
 -- Command name → function mapping
-local commandMap: { [string]: (table) -> any } = {
+-- GAP #9a: runLua removed from the command map.
+local commandMap: { [string]: ({ [string]: any }) -> any } = {
     createPart = CommandExecutor.createPart,
     createModel = CommandExecutor.createModel,
     deletePart = CommandExecutor.deletePart,
@@ -408,11 +459,11 @@ local commandMap: { [string]: (table) -> any } = {
 
 --[[
     Execute a single command.
-    @param command table -- { type, ...params }
+    @param command { [string]: any } -- { type, ...params }
     @return any -- result
     @return string? -- error
 ]]
-function CommandExecutor.execute(command: table): (any, string?)
+function CommandExecutor.execute(command: { [string]: any }): (any, string?)
     if type(command) ~= "table" then
         return nil, "Command must be a table"
     end
@@ -463,11 +514,11 @@ end
     - Each part emits a particle burst and material-aware sound on landing
     - The final part triggers a multi-colored completion burst
 
-    @param commands { table } -- array of command tables
-    @return { table } -- array of { success, result, error } per command
+    @param commands { { [string]: any } } -- array of command tables
+    @return { { [string]: any } } -- array of { success, result, error } per command
 ]]
-function CommandExecutor.executeBatch(commands: { table }): { table }
-    local results = {}
+function CommandExecutor.executeBatch(commands: { { [string]: any } }): { { [string]: any } }
+    local results: { { [string]: any } } = {}
 
     -- Enter batch mode — created parts will be collected for deferred animation
     inBatchMode = true
@@ -504,13 +555,7 @@ function CommandExecutor.executeBatch(commands: { table }): { table }
             local ttrans = part:GetAttribute("BA_TargetTransparency")
 
             if tx then
-                -- Restore the target size and transparency on the part so
-                -- BuildAnimator.animateBatch (which reads part.Size as the tween target)
-                -- will tween to the correct values. Then re-apply the pre-animation state.
                 local targetSize = Vector3.new(tx, ty, tz)
-
-                -- Set the part to its target size/transparency momentarily,
-                -- then call animatePart which records the target and squashes it.
                 part.Size = targetSize
                 part.Transparency = ttrans or 0
 

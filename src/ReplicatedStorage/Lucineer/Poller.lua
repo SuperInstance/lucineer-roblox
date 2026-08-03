@@ -12,7 +12,7 @@ local Http = require(script.Parent.Http)
     {
         id: string,
         startedAt: number (os.clock()),
-        onComplete: (response: table) -> (),
+        onComplete: (response: { [string]: any }) -> (),
         onError: (error: string) -> (),
     }
 ]]
@@ -20,13 +20,15 @@ local Http = require(script.Parent.Http)
 export type Job = {
     id: string,
     startedAt: number,
-    onComplete: (response: table) -> (),
+    onComplete: (response: { [string]: any }) -> (),
     onError: (err: string) -> (),
 }
 
 local Poller = {}
 Poller._jobs = {} :: { [string]: Job }
+Poller._inFlight = {} :: { [string]: boolean }  -- GAP #10/A6: prevent overlapping polls per job
 Poller._accumulator = 0 :: number
+Poller._timeoutAccumulator = 0 :: number  -- GAP #10/A6: throttle checkTimeouts to poll interval
 Poller._initialized = false
 
 --[[
@@ -52,6 +54,7 @@ end
 ]]
 function Poller.unregister(jobId: string)
     Poller._jobs[jobId] = nil
+    Poller._inFlight[jobId] = nil  -- GAP #10/A6: clean up in-flight flag
 end
 
 --[[
@@ -72,7 +75,16 @@ end
     @param job Job
 ]]
 local function pollJob(job: Job)
+    -- GAP #10/A6: in-flight guard so overlapping polls don't stack
+    if Poller._inFlight[job.id] then
+        return
+    end
+    Poller._inFlight[job.id] = true
+
     local response, err = Http.get("/api/job/" .. job.id)
+
+    Poller._inFlight[job.id] = nil
+
     if err then
         print(string.format("[Lucineer] Poller: HTTP error for job %s: %s", job.id, err))
         return -- will retry on next tick (unless timed out)
@@ -123,8 +135,14 @@ end
 function Poller.tick(dt: number)
     Poller._accumulator += dt
 
-    -- Check timeouts every tick (cheap)
-    checkTimeouts()
+    -- GAP #10/A6: Move checkTimeouts from every Heartbeat (60×/s) to inside
+    -- the poll interval. The timeout table only changes on poll cycles,
+    -- so checking every tick is wasted work.
+    Poller._timeoutAccumulator += dt
+    if Poller._timeoutAccumulator >= Config.POLL_INTERVAL then
+        Poller._timeoutAccumulator = 0
+        checkTimeouts()
+    end
 
     -- Only poll at the configured interval
     if Poller._accumulator < Config.POLL_INTERVAL then
@@ -156,7 +174,9 @@ function Poller.init()
     end
     Poller._initialized = true
     Poller._jobs = {}
+    Poller._inFlight = {}
     Poller._accumulator = 0
+    Poller._timeoutAccumulator = 0
     print("[Lucineer] Poller: initialized")
 end
 

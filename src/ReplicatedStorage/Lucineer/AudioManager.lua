@@ -231,7 +231,7 @@ local preloadedIds: {[string]: boolean} = {}
     @param parent Instance to parent the sound to
     @return Sound
 ]]
-local function createSound(def: table, parent: Instance): Sound
+local function createSound(def: { [string]: any }, parent: Instance): Sound
     local sound = Instance.new("Sound")
     sound.SoundId = def.soundId
     sound.Volume = def.volume
@@ -249,7 +249,7 @@ end
     @param position Vector3? optional world position for 3D sound
     @param groupName string SoundGroup name ("sfx" by default)
 ]]
-local function playOneShot(def: table, position: Vector3?, groupName: string?)
+local function playOneShot(def: { [string]: any }, position: Vector3?, groupName: string?)
     groupName = groupName or "sfx"
     local group = soundGroups[groupName]
 

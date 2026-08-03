@@ -59,8 +59,15 @@
     "ServerScriptService": {
       "$className": "ServerScriptService",
       "LucineerServer": {
-        "$className": "Script",
-        "$path": "src/ServerScriptService/LucineerServer/init.lua"
+        "$className": "Folder",
+        "init": {
+          "$className": "Script",
+          "$path": "src/ServerScriptService/LucineerServer/init.lua"
+        },
+        "ServerConfig": {
+          "$className": "ModuleScript",
+          "$path": "src/ServerScriptService/LucineerServer/ServerConfig.lua"
+        }
       },
       "NPCManager": {
         "$className": "Folder",

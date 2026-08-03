@@ -739,7 +739,7 @@ end
     @param dialogueTable table — array of dialogue strings
     @return string
 ]]
-local function getNextLine(npcName: string, dialogueTable: table): string
+local function getNextLine(npcName: string, dialogueTable: { [string]: any }): string
     local idx = dialogueIndex[npcName] or 0
     idx = idx + 1
     if idx > #dialogueTable then
@@ -1225,7 +1225,7 @@ end
     @param index number (1-5)
     @return table?
 ]]
-function NPCManager.getQuest(index: number): table?
+function NPCManager.getQuest(index: number): { [string]: any }?
     return EARL_QUESTS[index]
 end
 
@@ -1233,7 +1233,7 @@ end
     Get all active NPC names.
     @return table — array of string names
 ]]
-function NPCManager.getNPCNames(): table
+function NPCManager.getNPCNames(): { [string]: any }
     local names = {}
     for name in pairs(npcs) do
         table.insert(names, name)

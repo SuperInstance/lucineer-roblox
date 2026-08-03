@@ -561,7 +561,7 @@ end
     @param playerId string
     @return table -- full state snapshot
 ]]
-function AchievementManager.getDetailedStats(playerId: string): table
+function AchievementManager.getDetailedStats(playerId: string): { [string]: any }
     local state = getState(playerId)
     local progress = AchievementManager.getProgress(playerId)
 
@@ -823,7 +823,7 @@ end
     Get all achievement definitions (for debugging or admin tools).
     @return table -- all 49 achievement definitions keyed by id
 ]]
-function AchievementManager.getAllDefinitions(): table
+function AchievementManager.getAllDefinitions(): { [string]: any }
     return ACHIEVEMENTS
 end
 
@@ -831,7 +831,7 @@ end
     Get tier names.
     @return table
 ]]
-function AchievementManager.getTierNames(): table
+function AchievementManager.getTierNames(): { [string]: any }
     return TIER_NAMES
 end
 

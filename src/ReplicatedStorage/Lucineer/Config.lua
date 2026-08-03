@@ -1,16 +1,16 @@
 --[[
-    Lucineer Configuration
-    Central settings for the Roblox client.
-    Adjust WORKER_URL and AUTH_KEY to match your Cloudflare Worker deployment.
+    Lucineer Configuration — CLIENT-SAFE settings only.
+
+    This module lives in ReplicatedStorage and replicates to every client.
+    NEVER put secrets, API keys, auth tokens, or server URLs here.
+    Sensitive configuration lives in ServerConfig (ServerScriptService),
+    which does NOT replicate to clients.
 ]]
 
 local Config = {}
 
--- Worker endpoint (Cloudflare Worker URL)
-Config.WORKER_URL = "https://lucineer-relay.casey-digennaro.workers.dev"
-
--- Authentication key (set this to match your Worker's LUCINEER_AUTH_KEY)
-Config.AUTH_KEY = "" -- Auth removed: player endpoint no longer requires key (see Worker hardening #3)
+-- NOTE: WORKER_URL and AUTH_KEY have been moved to ServerConfig (ServerScriptService).
+-- They are injected into Http at server initialization time.
 
 -- Session identity. JobId is unique per server instance; PlaceId scopes it.
 -- This is sent to the Worker so it can route jobs and state to the correct session.

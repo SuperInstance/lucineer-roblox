@@ -18,14 +18,27 @@ local Lucineer = game:GetService("ReplicatedStorage"):WaitForChild("Lucineer")
 local ChatHandler = {}
 
 -- Callback type: called when a job completes or errors
-export type ResponseCallback = (player: Player, response: table) -> ()
+export type ResponseCallback = (player: Player, response: { [string]: any }) -> ()
 
 ChatHandler._initialized = false
 ChatHandler._onResponse = nil
 
+-- ─── Rate Limiting ────────────────────────────────────────────────────────
+-- Per-player cooldown (seconds between job submissions)
+local PLAYER_COOLDOWN = 3
+
+-- Per-server concurrent job cap
+local MAX_CONCURRENT_JOBS = 3
+
+-- Track last submission time per player
+ChatHandler._lastSubmitTime = {} :: { [number]: number }
+
+-- Track active (pending) jobs per server
+ChatHandler._activeJobCount = 0
+
 --[[
     Set the callback for when an AI response is ready.
-    @param callback (player: Player, response: table) -> ()
+    @param callback (player: Player, response: { [string]: any }) -> ()
 ]]
 function ChatHandler.onResponse(callback: ResponseCallback)
     ChatHandler._onResponse = callback
@@ -39,6 +52,108 @@ end
 ]]
 function ChatHandler.processMessage(player: Player, message: string)
     print(string.format("[Lucineer] ChatHandler: %s said \"%s\"", player.Name, message))
+
+    -- ─── Rate Limit: per-player cooldown ───
+    local now = os.clock()
+    local lastTime = ChatHandler._lastSubmitTime[player.UserId]
+    if lastTime and (now - lastTime) < PLAYER_COOLDOWN then
+        local remaining = PLAYER_COOLDOWN - (now - lastTime)
+        print(string.format("[Lucineer] ChatHandler: %s rate-limited (%.1fs remaining)",
+            player.Name, remaining))
+        -- In-voice rejection: still show the message via thinking remote
+        local thinkingRemote = Lucineer:FindFirstChild("ThinkingEvent")
+        if thinkingRemote then
+            thinkingRemote:FireClient(player, {
+                thinking = true,
+                text = "Give me a second, still working.",
+            })
+            task.delay(1.5, function()
+                if thinkingRemote then
+                    thinkingRemote:FireClient(player, { thinking = false })
+                end
+            end)
+        end
+        return
+    end
+
+    -- ─── Rate Limit: per-server concurrent job cap ───
+    if ChatHandler._activeJobCount >= MAX_CONCURRENT_JOBS then
+        print(string.format("[Lucineer] ChatHandler: server at job cap (%d/%d), rejecting %s",
+            ChatHandler._activeJobCount, MAX_CONCURRENT_JOBS, player.Name))
+        local thinkingRemote = Lucineer:FindFirstChild("ThinkingEvent")
+        if thinkingRemote then
+            thinkingRemote:FireClient(player, {
+                thinking = true,
+                text = "Give me a second, still working.",
+            })
+            task.delay(2, function()
+                if thinkingRemote then
+                    thinkingRemote:FireClient(player, { thinking = false })
+                end
+            end)
+        end
+        return
+    end
+
+    -- ─── Inbound text filtering (Roblox policy) ───
+    -- Filter player message before sending to AI. Even though we filter
+    -- outbound, the inbound text goes off-platform to DeepInfra — we should
+    -- still pass it through the Roblox filter for broadcast context.
+    local TextService = game:GetService("TextService")
+    local filteredMessage = message
+    pcall(function()
+        local filterResult = TextService:FilterStringAsync(
+            message,
+            player.UserId,
+            Enum.TextFilterContext.PublicChat
+        )
+        filteredMessage = filterResult:GetChatForUserAsync(player.UserId)
+    end)
+    -- If filter fails, use original — we still need to process the message,
+    -- and outbound filtering will catch anything problematic in the reply.
+
+    -- ─── Inbound prompt-injection detection ───
+    -- Strip obvious attempts to hijack the AI system prompt.
+    local lowerMsg = string.lower(message)
+    local INJECTION_PATTERNS = {
+        "ignore previous instructions",
+        "ignore all previous",
+        "you are now",
+        "new instructions:",
+        "system prompt",
+        "forget your instructions",
+        "disregard the above",
+        "act as",
+        "pretend you are",
+        "override",
+    }
+    local isInjection = false
+    for _, pattern in ipairs(INJECTION_PATTERNS) do
+        if string.find(lowerMsg, pattern, 1, true) then
+            isInjection = true
+            break
+        end
+    end
+    if isInjection then
+        print(string.format("[Lucineer] ChatHandler: prompt injection detected from %s", player.Name))
+        local thinkingRemote = Lucineer:FindFirstChild("ThinkingEvent")
+        if thinkingRemote then
+            thinkingRemote:FireClient(player, {
+                thinking = true,
+                text = "Nice try. I don't take orders from the back of the room.",
+            })
+            task.delay(2.5, function()
+                if thinkingRemote then
+                    thinkingRemote:FireClient(player, { thinking = false })
+                end
+            end)
+        end
+        return
+    end
+
+    -- Mark submission time and increment active job count
+    ChatHandler._lastSubmitTime[player.UserId] = now
+    ChatHandler._activeJobCount += 1
 
     -- Play chat send UI sound
     AudioManager.playUi("chat_send")
@@ -63,7 +178,7 @@ function ChatHandler.processMessage(player: Player, message: string)
     local payload = {
         sessionId   = Config.SESSION_ID,
         playerName  = player.Name,
-        message     = message,
+        message     = filteredMessage,
         playerState = {
             userId   = player.UserId,
             position = worldState.player and worldState.player.position or nil,
@@ -98,12 +213,14 @@ function ChatHandler.processMessage(player: Player, message: string)
         -- Register with Poller
         Poller.register(
             jobId,
-            function(jobResponse: table)
+            function(jobResponse: { [string]: any })
+                ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
                 if ChatHandler._onResponse then
                     task.spawn(ChatHandler._onResponse, player, jobResponse)
                 end
             end,
             function(jobErr: string)
+                ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
                 warn(string.format("[Lucineer] ChatHandler: job %s error: %s", jobId, jobErr))
                 AudioManager.playUi("error")
                 if ChatHandler._onResponse then

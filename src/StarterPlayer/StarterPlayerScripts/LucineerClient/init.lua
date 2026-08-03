@@ -16,20 +16,15 @@ local Lucineer = ReplicatedStorage:WaitForChild("Lucineer")
 local Config = require(Lucineer:WaitForChild("Config"))
 local UIManager = require(Lucineer:WaitForChild("UIManager"))
 
--- Get RemoteEvents (created by server)
--- Wait for server to create RemoteEvents (with timeout fallback)
-local ResponseRemote = Lucineer:FindFirstChild("ResponseEvent")
-local ThinkingRemote = Lucineer:FindFirstChild("ThinkingEvent")
+-- GAP #9e: Wait for the server to create RemoteEvents instead of fabricating
+-- client-side phantom copies. A client-created RemoteEvent can never be fired
+-- by the server, so the client would listen to a dead event forever.
+local ResponseRemote = Lucineer:WaitForChild("ResponseEvent", 30)
+local ThinkingRemote = Lucineer:WaitForChild("ThinkingEvent", 30)
 
-if not ResponseRemote then
-	ResponseRemote = Instance.new("RemoteEvent")
-	ResponseRemote.Name = "ResponseEvent"
-	ResponseRemote.Parent = Lucineer
-end
-if not ThinkingRemote then
-	ThinkingRemote = Instance.new("RemoteEvent")
-	ThinkingRemote.Name = "ThinkingEvent"
-	ThinkingRemote.Parent = Lucineer
+if not (ResponseRemote and ThinkingRemote) then
+	warn("[Lucineer] Client: server RemoteEvents never appeared after 30s — aborting")
+	return
 end
 
 --[[
@@ -47,7 +42,7 @@ print("[Lucineer] Client: initialized for " .. player.Name)
     Handle thinking state changes from the server.
     Shows/hides the "Lucineer is thinking..." bar.
 ]]
-ThinkingRemote.OnClientEvent:Connect(function(data: table)
+ThinkingRemote.OnClientEvent:Connect(function(data: { [string]: any })
     if data.thinking then
         UIManager.showThinking(data.text)
     else
@@ -59,7 +54,7 @@ end)
     Handle AI responses from the server.
     Routes by type: message, commands, error.
 ]]
-ResponseRemote.OnClientEvent:Connect(function(data: table)
+ResponseRemote.OnClientEvent:Connect(function(data: { [string]: any })
     if not data or type(data) ~= "table" then
         warn("[Lucineer] Client: received malformed response")
         return

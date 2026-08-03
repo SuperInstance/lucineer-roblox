@@ -12,35 +12,77 @@ local RunService = game:GetService("RunService")
 local TextService = game:GetService("TextService")
 
 --[[
-    filterText: Wraps TextService:FilterStringAsync for Roblox policy compliance.
-    Fail-closed: on any error, returns a safe placeholder.
+    filterText (alias: filterFor): Wraps TextService:FilterStringAsync for
+    Roblox policy compliance. Uses PublicChat context as required for any
+    user-influenced text broadcast to other players.
+
+    Fail-closed: on any error, returns "..." (never the unfiltered text).
     Every AI-generated string must pass through this before reaching a client.
 ]]
-local function filterText(text: string, playerId: number): string
+local function filterFor(text: string, player: Player): string
     if not text or text == "" then
         return text
     end
     local ok, filterResult = pcall(function()
-        return TextService:FilterStringAsync(text, playerId)
+        return TextService:FilterStringAsync(
+            text,
+            player.UserId,
+            Enum.TextFilterContext.PublicChat
+        )
     end)
     if not ok or not filterResult then
-        warn("[Lucineer] filterText: FilterStringAsync failed, returning safe default")
-        return "[filtered]"
+        warn("[Lucineer] filterFor: FilterStringAsync failed, suppressing message")
+        return "..."  -- fail closed: never show unfiltered text
     end
     local ok2, filtered = pcall(function()
-        return filterResult:GetNonChatStringForUserAsync()
+        return filterResult:GetChatForUserAsync(player.UserId)
     end)
     if not ok2 or not filtered then
-        warn("[Lucineer] filterText: GetNonChatStringForUserAsync failed, returning safe default")
-        return "[filtered]"
+        warn("[Lucineer] filterFor: GetChatForUserAsync failed, suppressing message")
+        return "..."  -- fail closed
     end
     return filtered
 end
 
--- Load modules
+-- Backward-compatible alias
+local function filterText(text: string, playerId: number): string
+    -- Wrapper for legacy call sites that only have the userId.
+    -- Prefer filterFor() which takes the Player object directly.
+    if not text or text == "" then
+        return text
+    end
+    local ok, filterResult = pcall(function()
+        return TextService:FilterStringAsync(
+            text,
+            playerId,
+            Enum.TextFilterContext.PublicChat
+        )
+    end)
+    if not ok or not filterResult then
+        warn("[Lucineer] filterText: FilterStringAsync failed, suppressing message")
+        return "..."
+    end
+    local ok2, filtered = pcall(function()
+        return filterResult:GetChatForUserAsync(playerId)
+    end)
+    if not ok2 or not filtered then
+        warn("[Lucineer] filterText: GetChatForUserAsync failed, suppressing message")
+        return "..."
+    end
+    return filtered
+end
+
+-- Load server-only config FIRST (contains secrets — not replicated to clients)
+local ServerConfig = require(script:WaitForChild("ServerConfig"))
+
+-- Load shared modules
 local Lucineer = game:GetService("ReplicatedStorage"):WaitForChild("Lucineer")
 local Config = require(Lucineer:WaitForChild("Config"))
 local Http = require(Lucineer:WaitForChild("Http"))
+
+-- Inject server-only credentials into Http module.
+-- This must happen before any Http.get/post calls.
+Http.configure(ServerConfig.WORKER_URL, ServerConfig.AUTH_KEY)
 local Poller = require(Lucineer:WaitForChild("Poller"))
 local ChatHandler = require(Lucineer:WaitForChild("ChatHandler"))
 local CommandExecutor = require(Lucineer:WaitForChild("CommandExecutor"))
@@ -75,13 +117,64 @@ local CommandRemote = createRemote("CommandEvent")      -- server → client: co
 -- State sync accumulator
 local stateSyncAccumulator = 0
 
+-- Progressive thinking messages — rotate every ~5s while a job is pending
+local THINKING_MESSAGES = {
+    "Looking at the ground...",
+    "Checking what's already here...",
+    "Working on it...",
+    "Almost there...",
+}
+
+-- Track active thinking rotation threads per player
+local thinkingRotations: { [Player]: thread } = {}
+
+--[[
+    Start rotating thinking messages for a player while their job is pending.
+    Fires a new thinking text update every ~5 seconds.
+]]
+local function startThinkingRotation(player: Player)
+    -- Stop any existing rotation for this player
+    local existing = thinkingRotations[player]
+    if existing then
+        task.cancel(existing)
+    end
+
+    local msgIndex = 1
+    thinkingRotations[player] = task.spawn(function()
+        -- Immediate first message (beyond the initial "Lucineer is thinking...")
+        task.wait(5)
+        while thinkingRotations[player] do
+            ThinkingRemote:FireClient(player, {
+                thinking = true,
+                text = THINKING_MESSAGES[msgIndex],
+            })
+            msgIndex = (msgIndex % #THINKING_MESSAGES) + 1
+            task.wait(5)
+        end
+    end)
+end
+
+--[[
+    Stop the thinking message rotation for a player.
+]]
+local function stopThinkingRotation(player: Player)
+    local thread = thinkingRotations[player]
+    if thread then
+        task.cancel(thread)
+        thinkingRotations[player] = nil
+    end
+end
+
 --[[
     Handle AI response: execute commands, send results to client.
     @param player Player -- the player who initiated the chat
     @param response table -- the job response from the Worker
 ]]
-local function handleResponse(player: Player, response: table)
+local function handleResponse(player: Player, response: { [string]: any })
     print(string.format("[Lucineer] Server: received response for %s", player.Name))
+
+    -- Stop any progressive thinking rotation — the job is done
+    stopThinkingRotation(player)
 
     if response.error then
         -- Play error UI sound
@@ -91,7 +184,7 @@ local function handleResponse(player: Player, response: table)
 
         ResponseRemote:FireClient(player, {
             type = "error",
-            message = filterText(response.message or "Unknown error", player.UserId),
+            message = filterFor(response.message or "Unknown error", player),
         })
         ThinkingRemote:FireClient(player, { thinking = false })
         return
@@ -113,6 +206,9 @@ local function handleResponse(player: Player, response: table)
             thinking = true,
             text = string.format("Building %d actions...", #commands),
         })
+
+        -- Start progressive thinking rotation for the build phase
+        startThinkingRotation(player)
 
         -- Execute via CommandExecutor (internally routes through BuildAnimator
         -- for staggered cinematic reveal of created parts)
@@ -140,7 +236,7 @@ local function handleResponse(player: Player, response: table)
             if result.success and result.result and result.result.type == "sendMessage" then
                 ResponseRemote:FireClient(player, {
                     type = "message",
-                    message = filterText(result.result.message, player.UserId),
+                    message = filterFor(result.result.message, player),
                 })
             end
         end
@@ -158,7 +254,7 @@ local function handleResponse(player: Player, response: table)
 
         ResponseRemote:FireClient(player, {
             type = "message",
-            message = filterText(replyText, player.UserId),
+            message = filterFor(replyText, player),
         })
     end
 
@@ -174,6 +270,7 @@ end
     so the AI has context even without a player message.
 ]]
 local function syncState()
+    -- State sync: lightweight world snapshot sent to the Worker every Config.STATE_SYNC_INTERVAL seconds.
     for _, player in ipairs(Players:GetPlayers()) do
         local state = WorldScanner.quickScan(player)
         task.spawn(function()
@@ -230,10 +327,11 @@ local function init()
     -- Handle player removal
     Players.PlayerRemoving:Connect(function(player: Player)
         print(string.format("[Lucineer] Server: player %s leaving, cleaning up", player.Name))
+        ChatHandler._lastSubmitTime[player.UserId] = nil
     end)
 
     print("[Lucineer] Server: initialized ✓")
-    print(string.format("[Lucineer] Server: worker URL = %s", Config.WORKER_URL))
+    print(string.format("[Lucineer] Server: worker URL = %s", ServerConfig.WORKER_URL))
     print(string.format("[Lucineer] Server: poll interval = %.1fs, timeout = %ds", Config.POLL_INTERVAL, Config.POLL_TIMEOUT))
     print(string.format("[Lucineer] Server: state sync interval = %ds", Config.STATE_SYNC_INTERVAL))
 end

@@ -503,7 +503,7 @@ end
     @param playerId string
     @return table -- { current = N, needed = M, nextLevel = L, pct = 0-1 }
 ]]
-function BondSystem.getProgressToNext(playerId: string): table
+function BondSystem.getProgressToNext(playerId: string): { [string]: any }
     local data = getData(playerId)
     local currentLevel = data.level
 
@@ -534,7 +534,7 @@ end
     @param playerId string
     @return table
 ]]
-function BondSystem.getPlayerData(playerId: string): table
+function BondSystem.getPlayerData(playerId: string): { [string]: any }
     local data = getData(playerId)
     return {
         xp = data.xp,
@@ -552,7 +552,7 @@ end
     Get level thresholds (for external systems that need them).
     @return table
 ]]
-function BondSystem.getThresholds(): table
+function BondSystem.getThresholds(): { [string]: any }
     return LEVEL_THRESHOLDS
 end
 
@@ -560,7 +560,7 @@ end
     Get stage names (for external systems).
     @return table
 ]]
-function BondSystem.getStageNames(): table
+function BondSystem.getStageNames(): { [string]: any }
     return STAGE_NAMES
 end
 

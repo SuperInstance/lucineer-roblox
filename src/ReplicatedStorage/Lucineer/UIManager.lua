@@ -7,11 +7,25 @@
     It creates GUI elements programmatically — no pre-built ScreenGui needed.
 
     Integrates VoiceLines for personality-driven message display.
+
+    GAP #9d Fixes:
+      - Replaced StarterGui:SetCore("ChatMakeSystemMessage") with
+        TextChatService.TextChannels.RBXGeneral:DisplaySystemMessage (with pcall legacy fallback).
+      - Replaced Chat:Chat() with TextChatService:DisplayBubble() (with pcall legacy fallback).
+
+    GAP A6 Fixes:
+      - showThinking animation loop guarded with a token so multiple rapid calls
+        don't spawn competing while-loops fighting over the same Dot.
+      - Nil check on _thinkingLabel before dereferencing.
+
+    GAP #9e Fixes:
+      - All `table` type annotations replaced with `{ [string]: any }`.
 ]]
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local TextChatService = game:GetService("TextChatService")
 
 local Config = require(script.Parent.Config)
 local VoiceLines = require(script.Parent.VoiceLines)
@@ -24,12 +38,15 @@ UIManager._thinkingBar = nil :: Frame?
 UIManager._thinkingLabel = nil :: TextLabel?
 UIManager._initialized = false
 
+-- A6: Animation token for showThinking loop — prevents competing while-loops.
+UIManager._thinkingAnimToken = 0 :: number
+
 -- Active chat bubble tracking (for cleanup / overlap avoidance)
-UIManager._activeBubbles = {} :: {Frame}
+UIManager._activeBubbles = {} :: { Frame }
 UIManager._maxBubbles = 3
 
 -- Message type → display style mapping
-local MESSAGE_STYLES = {
+local MESSAGE_STYLES: { [string]: { [string]: any } } = {
     message = {
         bgColor = Color3.fromRGB(20, 35, 50),
         accentColor = Color3.fromRGB(0, 255, 170),
@@ -143,11 +160,20 @@ end
 
 --[[
     Show the thinking bar with optional custom text.
+    GAP A6: Animation loop guarded with a token — each call increments
+    _thinkingAnimToken and the loop checks it. If a new call comes in,
+    the old loop exits instead of spawning a competing one.
+    GAP A6: Nil check on _thinkingLabel before dereferencing.
     @param text string? -- override text (defaults to Config.UI_THINKING_TEXT)
 ]]
 function UIManager.showThinking(text: string?)
     if not UIManager._thinkingBar then return end
-    UIManager._thinkingLabel.Text = text or Config.UI_THINKING_TEXT
+
+    -- A6: Guard against nil _thinkingLabel
+    if UIManager._thinkingLabel then
+        UIManager._thinkingLabel.Text = text or Config.UI_THINKING_TEXT
+    end
+
     UIManager._thinkingBar.Visible = true
 
     -- Slide up animation
@@ -159,18 +185,31 @@ function UIManager.showThinking(text: string?)
     )
     tween:Play()
 
-    -- Pulsing dot animation
+    -- A6: Pulsing dot animation with token guard.
+    -- Each call gets a unique token. The loop checks it every iteration;
+    -- if a newer call came in, this loop exits.
+    UIManager._thinkingAnimToken += 1
+    local myToken = UIManager._thinkingAnimToken
+
     task.spawn(function()
-        while UIManager._thinkingBar and UIManager._thinkingBar.Visible do
+        while UIManager._thinkingBar and UIManager._thinkingBar.Visible
+            and myToken == UIManager._thinkingAnimToken do
+            local dot = UIManager._thinkingBar:FindFirstChild("Dot")
+            if not dot then break end
+
             local pulse = TweenService:Create(
-                UIManager._thinkingBar:FindFirstChild("Dot"),
+                dot,
                 TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                 { BackgroundTransparency = 0.5 }
             )
             pulse:Play()
             pulse.Completed:Wait()
+
+            -- Check token again after wait
+            if myToken ~= UIManager._thinkingAnimToken then break end
+
             local unpulse = TweenService:Create(
-                UIManager._thinkingBar:FindFirstChild("Dot"),
+                dot,
                 TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                 { BackgroundTransparency = 0 }
             )
@@ -185,6 +224,9 @@ end
 ]]
 function UIManager.hideThinking()
     if not UIManager._thinkingBar then return end
+
+    -- A6: Invalidate the animation token so the pulsing loop exits.
+    UIManager._thinkingAnimToken += 1
 
     local tween = TweenService:Create(
         UIManager._thinkingBar,
@@ -421,9 +463,10 @@ local function createChatBubble(text: string, styleKey: string, duration: number
 end
 
 --[[
-    Display Lucineer's response using the custom chat bubble system.
+    GAP #9d: Display Lucineer's response using the custom chat bubble system.
     Picks display style based on message type and applies a typewriter effect.
-    Falls back to native chat if the custom bubble fails.
+    Falls back to TextChatService:DisplaySystemMessage, then legacy
+    StarterGui:SetCore("ChatMakeSystemMessage") in a pcall.
 
     @param message string? -- the message text (may be empty, in which case VoiceLines fills in)
     @param msgType string? -- message type: "message", "error", "commands", "greeting", "idle"
@@ -443,20 +486,37 @@ function UIManager.displayChatResponse(message: string?, msgType: string?)
 
     if not ok then
         warn(string.format("[Lucineer] UIManager: custom bubble failed: %s, falling back to chat", err))
-        -- Fallback: native chat
-        pcall(function()
-            StarterGui:SetCore("ChatMakeSystemMessage", {
-                Text = "[" .. Config.BOT_NAME .. "]: " .. displayText,
-                Color = Config.CHAT_COLOR,
-                Font = Enum.Font.GothamMedium,
-                TextSize = 16,
-            })
+        -- GAP #9d: Try TextChatService first (modern API)
+        local chatOk = pcall(function()
+            local channels = TextChatService:FindFirstChild("TextChannels")
+            if channels then
+                local channel = channels:FindFirstChild("RBXGeneral")
+                if channel then
+                    channel:DisplaySystemMessage(
+                        string.format('<font color="#00FFAA">[%s]</font> %s', Config.BOT_NAME, displayText))
+                    return
+                end
+            end
+            -- If we get here, TextChatService path didn't work — force error to trigger legacy fallback
+            error("TextChatService channels not available")
         end)
+        -- GAP #9d: Legacy fallback for older experiences
+        if not chatOk then
+            pcall(function()
+                StarterGui:SetCore("ChatMakeSystemMessage", {
+                    Text = "[" .. Config.BOT_NAME .. "]: " .. displayText,
+                    Color = Config.CHAT_COLOR,
+                    Font = Enum.Font.GothamMedium,
+                    TextSize = 16,
+                })
+            end)
+        end
     end
 end
 
 --[[
-    Create a floating chat bubble above a target part/position.
+    GAP #9d: Create a floating chat bubble above a target part/position.
+    Uses TextChatService:DisplayBubble (modern API) with Chat:Chat legacy fallback.
     Uses VoiceLines for spatial messages when no text is provided.
     @param text string? -- the bubble text (optional; pulls from VoiceLines if nil)
     @param adornee Instance -- the part to attach the bubble to
@@ -470,12 +530,16 @@ function UIManager.showChatBubble(text: string?, adornee: Instance, duration: nu
         text = VoiceLines.getWeighted()
     end
 
-    local ok, err = pcall(function()
-        game:GetService("Chat"):Chat(adornee, "[" .. Config.BOT_NAME .. "] " .. text, Enum.ChatColor.Green)
+    -- GAP #9d: Try TextChatService:DisplayBubble (modern API) first
+    local ok = pcall(function()
+        TextChatService:DisplayBubble(adornee, text)
     end)
 
+    -- GAP #9d: Legacy fallback for older experiences
     if not ok then
-        warn(string.format("[Lucineer] UIManager: Chat bubble failed: %s", err))
+        pcall(function()
+            game:GetService("Chat"):Chat(adornee, "[" .. Config.BOT_NAME .. "] " .. text, Enum.ChatColor.Green)
+        end)
     end
 end
 
@@ -484,8 +548,11 @@ end
     @param text string
 ]]
 function UIManager.updateThinkingText(text: string)
+    -- A6: Nil check on _thinkingLabel
     if UIManager._thinkingLabel then
         UIManager._thinkingLabel.Text = text
+    else
+        warn("[Lucineer] UIManager: updateThinkingText called before init (_thinkingLabel is nil)")
     end
 end
 

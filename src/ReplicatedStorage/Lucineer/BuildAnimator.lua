@@ -449,7 +449,7 @@ end
         — Parts already created (by CommandExecutor). Each part's current
           Size/Transparency is treated as the target.
 
-      animateBatch(commands: table, centerPosition: Vector3, player: Player?, executor: table)
+      animateBatch(commands: { [string]: any }, centerPosition: Vector3, player: Player?, executor: { [string]: any })
         — Raw commands. If an executor (CommandExecutor) is provided,
           each command is executed first, and the resulting parts are
           collected and animated.
@@ -798,7 +798,7 @@ end
 
     @param overrides table -- key/value pairs to merge into CONFIG
 ]]
-function BuildAnimator.configure(overrides: table)
+function BuildAnimator.configure(overrides: { [string]: any })
     for key, value in pairs(overrides or {}) do
         CONFIG[key] = value
     end
@@ -809,7 +809,7 @@ end
 
     @return table
 ]]
-function BuildAnimator.getConfig(): table
+function BuildAnimator.getConfig(): { [string]: any }
     local copy = {}
     for key, value in pairs(CONFIG) do
         copy[key] = value
