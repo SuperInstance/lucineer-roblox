@@ -51,7 +51,12 @@ local VoiceLines = require(game:GetService("ReplicatedStorage"):WaitForChild("Lu
 local Players = game:GetService("Players")
 
 -- Memory worker URL for bond level persistence
+-- NOTE: BondSystem uses raw HttpService:RequestAsync (not Http module) because it
+-- needs full URL control. Bug 2 fix: we must include auth headers manually.
 local MEMORY_URL = "https://lucineer-memory.casey-digennaro.workers.dev"
+
+-- Bug 2 fix: ServerConfig for auth key
+local ServerConfig = require(script.Parent:WaitForChild("LucineerServer"):WaitForChild("ServerConfig"))
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- TIER CONFIGURATION
@@ -354,7 +359,10 @@ local function persistBond(playerName: string, tier: number, bondPoints: number)
             return HttpService:RequestAsync({
                 Url = url,
                 Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["X-Lucineer-Key"] = ServerConfig.AUTH_KEY,  -- Bug 2 fix
+                },
                 Body = body,
             })
         end)

@@ -16,8 +16,8 @@
         SaveSystem.savePlayer(playerName)
         SaveSystem.loadPlayer(playerName)
         SaveSystem.saveBuilds(playerName)
-        SaveSystem.serializeBuilds()
-        SaveSystem.deserializeBuilds(data)
+        SaveSystem.serializeBuilds(playerName)
+        SaveSystem.deserializeBuilds(data, playerName)
         SaveSystem.createLegacyBuild(playerName)
 
     Dependencies:
@@ -325,16 +325,30 @@ local function serializePart(part)
 end
 
 --[[
-    Serialize all builds in the LucineerBuilds folder.
-    Scans for all BaseParts and collects their properties.
-    @return table -- { version, timestamp, parts, lights, metadata }
+    Serialize all builds for a specific player.
+    Bug 4 fix: filters by player ownership via per-player sub-folders.
+    @param playerName string -- the player whose builds to serialize
+    @return table -- { version, timestamp, playerName, parts, lights, metadata }
 ]]
-local function serializeBuilds()
-    local folder = ensureBuildsFolder()
+local function serializeBuilds(playerName)
     local parts = {}
     local lights = {}
 
-    for _, descendant in ipairs(folder:GetDescendants()) do
+    -- Bug 4 fix: scan only this player's folder, not the entire LucineerBuilds
+    local folder = ensureBuildsFolder()
+    local playerFolder = folder:FindFirstChild(playerName)
+    if not playerFolder then
+        return {
+            version = SAVE_VERSION,
+            timestamp = os.time(),
+            playerName = playerName,
+            parts = {},
+            lights = {},
+            metadata = { partCount = 0, lightCount = 0 },
+        }
+    end
+
+    for _, descendant in ipairs(playerFolder:GetDescendants()) do
         if descendant:IsA("BasePart") then
             local partData = serializePart(descendant)
             table.insert(parts, partData)
@@ -362,6 +376,7 @@ local function serializeBuilds()
     return {
         version = SAVE_VERSION,
         timestamp = os.time(),
+        playerName = playerName,
         parts = parts,
         lights = lights,
         metadata = {
@@ -376,15 +391,34 @@ end
     Parts are created directly (not via CommandExecutor.executeBatch) for
     instant restore — no animation, no sound, just placement.
 
+    Bug 4 fix: places parts into a per-player sub-folder and sets ownerId.
     @param data table -- the snapshot from serializeBuilds() / R2
+    @param playerName string? -- player name for per-player folder + ownerId
     @return number -- count of parts restored
 ]]
-local function deserializeBuilds(data)
+local function deserializeBuilds(data, playerName)
     if not data or not data.parts then
         return 0
     end
 
     local folder = ensureBuildsFolder()
+
+    -- Bug 4 fix: use per-player folder for ownership isolation
+    -- Clear existing folder first to avoid duplicates on rejoin
+    local playerFolder
+    if playerName then
+        playerFolder = folder:FindFirstChild(playerName)
+        if playerFolder then
+            playerFolder:Destroy()
+        end
+        playerFolder = Instance.new("Folder")
+        playerFolder.Name = playerName
+        playerFolder.Parent = folder
+    else
+        playerFolder = folder
+    end
+
+    local ownerId = playerName or "unknown"
     local restored = 0
 
     for _, partData in ipairs(data.parts) do
@@ -414,7 +448,9 @@ local function deserializeBuilds(data)
                     * CFrame.fromEulerAnglesXYZ(rx, ry, rz)
             end
 
-            part.Parent = folder
+            -- Bug 4 fix: set ownership attribute and parent to player folder
+            part:SetAttribute("ownerId", ownerId)
+            part.Parent = playerFolder
             restored = restored + 1
         end)
 
@@ -428,8 +464,8 @@ local function deserializeBuilds(data)
     if data.lights then
         for _, lightData in ipairs(data.lights) do
             pcall(function()
-                -- Find the parent part by name
-                local parentPart = folder:FindFirstChild(lightData.parent, true)
+                -- Find the parent part by name (search within player folder)
+                local parentPart = playerFolder:FindFirstChild(lightData.parent, true)
                 if not parentPart then return end
 
                 local lightType = lightData.lightType or "PointLight"
@@ -509,13 +545,17 @@ end
     @param playerName string
 ]]
 local function createLegacyBuild(playerName)
+    -- Bug 4 fix: only collect parts from this player's folder
     local folder = ensureBuildsFolder()
+    local playerFolder = folder:FindFirstChild(playerName)
 
-    -- Collect all parts in LucineerBuilds
+    -- Collect all parts in this player's folder
     local allParts = {}
-    for _, descendant in ipairs(folder:GetDescendants()) do
-        if descendant:IsA("BasePart") then
-            table.insert(allParts, descendant)
+    if playerFolder then
+        for _, descendant in ipairs(playerFolder:GetDescendants()) do
+            if descendant:IsA("BasePart") then
+                table.insert(allParts, descendant)
+            end
         end
     end
 
@@ -626,8 +666,8 @@ local function savePlayer(playerName)
 
     local success = true
 
-    -- Save build snapshot to R2
-    local buildSnapshot = serializeBuilds()
+    -- Save build snapshot to R2 (Bug 4 fix: pass playerName to filter)
+    local buildSnapshot = serializeBuilds(playerName)
     if buildSnapshot.metadata.partCount > 0 then
         local r2Ok = saveToR2("saves/" .. playerName .. "/builds.json", buildSnapshot)
         if not r2Ok then success = false end
@@ -685,7 +725,8 @@ local function saveBuilds(playerName)
         return true
     end
 
-    local snapshot = serializeBuilds()
+    -- Bug 4 fix: pass playerName to serialize only this player's builds
+    local snapshot = serializeBuilds(playerName)
     if snapshot.metadata.partCount > 0 then
         local ok = saveToR2("saves/" .. playerName .. "/builds.json", snapshot)
         if ok then
@@ -881,16 +922,20 @@ SaveSystem.saveToD1 = saveToD1
 SaveSystem.loadFromD1 = loadFromD1
 
 --[[
-    Serialize all builds in LucineerBuilds folder into a JSON-ready table.
+    Serialize all builds for a specific player into a JSON-ready table.
+    Bug 4 fix: filters by per-player sub-folder ownership.
     Captures: name, position, size, material, color, transparency, shape, anchored, rotation.
-    @return table -- { version, timestamp, parts, lights, metadata }
+    @param playerName string -- player whose builds to serialize
+    @return table -- { version, timestamp, playerName, parts, lights, metadata }
 ]]
 SaveSystem.serializeBuilds = serializeBuilds
 
 --[[
     Deserialize a build snapshot and reconstruct all parts in the workspace.
     Creates parts directly (no animation) for instant restore.
+    Bug 4 fix: places parts into per-player folder, sets ownerId attribute.
     @param data table -- snapshot from serializeBuilds() or R2
+    @param playerName string? -- player name for per-player folder + ownership
     @return number -- count of parts restored
 ]]
 SaveSystem.deserializeBuilds = deserializeBuilds
