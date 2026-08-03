@@ -206,6 +206,24 @@ local STORM_CONFIG = {
     },
 }
 
+-- INTEGRATION: LucineerBuilt structure damage configuration.
+-- These constants control how storms damage player-built structures
+-- that were tagged by CommandExecutor via CollectionService.
+local STRUCTURE_STORM_CONFIG = {
+    -- Damage per wave tick applied to LucineerBuilt structures near shore
+    structureWaveDamage    = 25,
+    -- At what health fraction does a structure start showing cracks
+    crackThreshold         = 0.5,
+    -- At what health fraction does a structure start visibly displacing
+    displacementThreshold  = 0.3,
+    -- How much a damaged structure displaces (studs)
+    displacementAmount     = 1.5,
+    -- Below this health fraction, a structure collapses (destroyed)
+    collapseThreshold      = 0.0,
+    -- Structural health multiplier for reinforced builds
+    reinforcedHealthMult   = 3.0,
+}
+
 -- Aurora configuration
 local AURORA_CONFIG = {
     achievementName = "Witnessed the Light",
@@ -250,19 +268,56 @@ WeatherSystem._auroraWitnessed = {}
 --[[
     Safely call into AudioManager if it's available.
     AudioManager is expected at ReplicatedStorage.Lucineer.AudioManager.
+
+    INTEGRATION: If AudioManager is missing, we emit a one-shot warning
+    (not per-call) so logs aren't spammed. The WeatherSystem fires
+    BindableEvents that AudioManager can also listen to as a fallback.
 ]]
+local _audioWarningShown = false
+
 local function getAudioManager()
     local ok, mod = pcall(function()
         return game.ReplicatedStorage:FindFirstChild("Lucineer")
     end)
-    if not ok or not mod then return nil end
+    if not ok or not mod then
+        if not _audioWarningShown then
+            warn("[WeatherSystem] ReplicatedStorage.Lucineer not found — audio disabled")
+            _audioWarningShown = true
+        end
+        return nil
+    end
     local am = mod:FindFirstChild("AudioManager")
-    if not am then return nil end
+    if not am then
+        if not _audioWarningShown then
+            warn("[WeatherSystem] AudioManager module not found at ReplicatedStorage.Lucineer.AudioManager")
+            _audioWarningShown = true
+        end
+        return nil
+    end
     -- AudioManager is a ModuleScript; require it
     local success, audioMgr = pcall(require, am)
     if success then return audioMgr end
+    if not _audioWarningShown then
+        warn("[WeatherSystem] Failed to require AudioManager:", audioMgr)
+        _audioWarningShown = true
+    end
     return nil
 end
+
+-- INTEGRATION: Create a BindableEvent for weather audio changes.
+-- AudioManager (or any consumer) can listen to this event to react
+-- to weather state changes without directly coupling to WeatherSystem.
+local weatherAudioEvent = Instance.new("BindableEvent")
+weatherAudioEvent.Name = "WeatherAudioChange"
+weatherAudioEvent.Parent = script
+
+-- INTEGRATION: Create a BindableEvent for storm damage events.
+-- Fires whenever a LucineerBuilt structure takes storm damage, carrying
+-- the part, damage amount, and new health. Other systems (UI, salvage,
+-- achievements) can listen to this.
+local stormDamageEvent = Instance.new("BindableEvent")
+stormDamageEvent.Name = "StormDamage"
+stormDamageEvent.Parent = script
 
 ----------------------------------------------------------------
 -- INTERNAL: WEATHER SELECTION

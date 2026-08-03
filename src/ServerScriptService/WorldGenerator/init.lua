@@ -30,6 +30,8 @@
 
 -- Services
 local Terrain = workspace.Terrain
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 
 -- Modules
 local Config = require(script.Config)
@@ -722,8 +724,223 @@ local function spawnBiomeResources()
 end
 
 --==========================================================================
--- PUBLIC API
+-- SPAWN POINT SELECTION
 --==========================================================================
+
+--[[
+    Find the best coastline position for the player spawn.
+    Scans the heightmap for a position that is:
+      • Above water level (so the player doesn't drown on join)
+      • Close to the water line (beach, not inland)
+      • On relatively flat ground (slope < threshold)
+    Returns a CFrame oriented facing the water center.
+
+    INTEGRATION: This closes the P0 gap — without a spawn point,
+    players fall to origin (0, 50, 0) and land on whatever terrain
+    is there. This places a SpawnLocation on the beach.
+
+    @return Vector3 spawnPosition
+    @return number beachAngle (radians, facing the water)
+]]
+local function findCoastlineSpawn()
+    local size = WorldGenerator._size
+    local halfSize = size / 2
+    local step = COLUMN_STEP
+    local waterLevel = Config.noise.waterLevel
+
+    local bestPos = nil
+    local bestScore = -math.huge
+    local bestAngle = 0
+
+    -- Scan the heightmap for coastline candidates.
+    -- Coastline = elevation just above water level, low slope.
+    local range = 6  -- height window above water to consider "beach"
+
+    for x = -halfSize, halfSize, step do
+        for z = -halfSize, halfSize, step do
+            local xIdx = math.floor((x + halfSize) / step) + 1
+            local zIdx = math.floor((z + halfSize) / step) + 1
+
+            if WorldGenerator._heightMap[xIdx] and WorldGenerator._heightMap[xIdx][zIdx] then
+                local elev = WorldGenerator._heightMap[xIdx][zIdx]
+                local biome = WorldGenerator._biomeMap[xIdx] and WorldGenerator._biomeMap[xIdx][zIdx]
+
+                -- Must be above water but close to it (beach zone)
+                if elev > waterLevel and elev <= waterLevel + range then
+                    -- Check slope by sampling neighbors
+                    local neighborElevs = {}
+                    local samples = {
+                        {x + step, z},
+                        {x - step, z},
+                        {x, z + step},
+                        {x, z - step},
+                    }
+                    local maxDiff = 0
+                    for _, sample in ipairs(samples) do
+                        local nxIdx = math.floor((sample[1] + halfSize) / step) + 1
+                        local nzIdx = math.floor((sample[2] + halfSize) / step) + 1
+                        if WorldGenerator._heightMap[nxIdx] and WorldGenerator._heightMap[nxIdx][nzIdx] then
+                            local diff = math.abs(WorldGenerator._heightMap[nxIdx][nzIdx] - elev)
+                            if diff > maxDiff then maxDiff = diff end
+                        end
+                    end
+
+                    -- Score: prefer low slope, close to water, coastline biome
+                    local slopeScore = -maxDiff * 2  -- lower slope = higher score
+                    local proximityScore = -(elev - waterLevel)  -- closer to water = higher score
+                    local biomeBonus = (biome == "coastline") and 5 or 0
+                    local score = slopeScore + proximityScore + biomeBonus
+
+                    if score > bestScore then
+                        bestScore = score
+                        -- Position 2 studs above terrain to avoid clipping
+                        bestPos = Vector3.new(x, elev + 2, z)
+                        -- Angle facing outward (toward water/deeper ocean)
+                        bestAngle = math.atan2(z, x)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Fallback: origin area above water
+    if not bestPos then
+        bestPos = Vector3.new(0, waterLevel + 5, 0)
+        bestAngle = 0
+    end
+
+    return bestPos, bestAngle
+end
+
+--[[
+    Place a SpawnLocation on the coastline.
+    Called after terrain generation so the heightmap is available.
+
+    Creates a SpawnLocation part and tags it for identification.
+    Also sets it as neutral so any team can spawn there.
+]]
+local function placeSpawnPoint()
+    local spawnPos, beachAngle = findCoastlineSpawn()
+
+    -- Create a SpawnLocation on the beach
+    local spawnLocation = Instance.new("SpawnLocation")
+    spawnLocation.Name = "BeachSpawn"
+    spawnLocation.Size = Vector3.new(6, 1, 6)
+    spawnLocation.Position = spawnPos
+    spawnLocation.Anchored = true
+    spawnLocation.CanCollide = true
+    spawnLocation.Material = Enum.Material.Sand
+    spawnLocation.Color = Color3.fromRGB(194, 178, 128)
+    spawnLocation.Neutral = true
+    spawnLocation.Duration = 0  -- instant respawn
+    spawnLocation.CFrame = CFrame.new(spawnPos) * CFrame.Angles(0, beachAngle, 0)
+    spawnLocation.Parent = workspace
+
+    -- Tag for identification by other systems
+    CollectionService:AddTag(spawnLocation, "LucineerSpawnPoint")
+    spawnLocation:SetAttribute("SpawnType", "coastline")
+    spawnLocation:SetAttribute("SpawnTime", os.time())
+
+    print(string.format("[WorldGenerator] Spawn point placed at %s (beach angle: %.1f°)",
+        tostring(spawnPos), math.deg(beachAngle)))
+end
+
+--==========================================================================
+-- RESOURCE HARVEST PROMPTS
+--==========================================================================
+
+--[[
+    Add ProximityPrompts to all resource node models so players can harvest them.
+
+    INTEGRATION: Closes the P0 gap where Resources.Harvest() exists but
+    nothing calls it from the client. Each resource model gets a ProximityPrompt
+    that fires a server-side harvest when triggered.
+
+    The ProximityPrompt is configured per resource type (different hold times,
+    yields, and action text).
+]]
+local function addResourcePrompts()
+    local nodes = Resources.GetAllNodes()
+    local promptCount = 0
+
+    for nodeId, node in pairs(nodes) do
+        if node.model and not node.depleted then
+            local model = node.model
+
+            -- Determine the BasePart to attach the prompt to
+            local attachPart = nil
+            if model:IsA("BasePart") then
+                attachPart = model
+            elseif model:IsA("Model") then
+                attachPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+            end
+
+            if attachPart and not attachPart:FindFirstChild("HarvestPrompt") then
+                local resDef = Config.resourceTypes[node.type]
+                local prompt = Instance.new("ProximityPrompt")
+                prompt.Name = "HarvestPrompt"
+                prompt.ActionText = "Harvest " .. (resDef and resDef.name or node.type)
+                prompt.ObjectText = resDef and resDef.name or "Resource"
+                prompt.HoldDuration = resDef and resDef.harvestTime or 1.0
+                prompt.MaxActivationDistance = 6
+                prompt.RequiresLineOfSight = false
+                prompt.KeyboardKeyCode = Enum.KeyCode.E
+
+                -- Visual style based on resource category
+                if node.type == "wood" or node.type == "hardwood" then
+                    prompt.ActionText = "Chop"
+                elseif node.type == "stone" or node.type == "limestone" or node.type == "iron_ore" then
+                    prompt.ActionText = "Mine"
+                elseif node.type == "fiber" or node.type == "kelp" then
+                    prompt.ActionText = "Gather"
+                elseif node.type == "fish" then
+                    prompt.ActionText = "Catch"
+                elseif node.type == "salvage" or node.type == "scrap_metal" then
+                    prompt.ActionText = "Scavenge"
+                end
+
+                prompt.Parent = attachPart
+
+                -- Wire the prompt trigger to Resources.Harvest
+                prompt.Triggered:Connect(function(player)
+                    if node.depleted then return end
+
+                    local harvestAmount = resDef and resDef.harvestYield or 3
+                    local harvested, resourceType = Resources.Harvest(nodeId, harvestAmount)
+
+                    if harvested > 0 and resourceType then
+                        -- Tag the player with the harvested resource for inventory systems
+                        local currentAmount = player:GetAttribute("Resource_" .. resourceType) or 0
+                        player:SetAttribute("Resource_" .. resourceType, currentAmount + harvested)
+
+                        -- Visual + audio feedback
+                        local feedbackPart = Instance.new("Part")
+                        feedbackPart.Size = Vector3.new(0.5, 0.5, 0.5)
+                        feedbackPart.Position = attachPart.Position + Vector3.new(0, 2, 0)
+                        feedbackPart.Transparency = 1
+                        feedbackPart.CanCollide = false
+                        feedbackPart.Anchored = true
+                        feedbackPart.Parent = workspace
+
+                        local sound = Instance.new("Sound")
+                        sound.SoundId = "rbxassetid://611472205" -- generic harvest sound
+                        sound.Volume = 0.5
+                        sound.Parent = feedbackPart
+                        sound:Play()
+                        game:GetService("Debris"):AddItem(feedbackPart, 2)
+
+                        print(string.format("[WorldGenerator] %s harvested %d %s from node %d",
+                            player.Name, harvested, resourceType, nodeId))
+                    end
+                end)
+
+                promptCount += 1
+            end
+        end
+    end
+
+    print(string.format("[WorldGenerator] Added %d ProximityPrompts to resource nodes", promptCount))
+end
 
 --- Generate the complete world.
 --- @param modeName string  Game mode key: "single", "multiplayer", "coop_novice_expert", "creative"
@@ -765,6 +982,14 @@ function WorldGenerator.Generate(modeName, seed)
     -- 5. Place visual props
     print("[WorldGenerator] Step 4/6: Placing props...")
     placeResourceProps()
+
+    -- 5b. Place spawn point (INTEGRATION: P0 — player must spawn on beach)
+    print("[WorldGenerator] Step 4b: Placing spawn point...")
+    placeSpawnPoint()
+
+    -- 5c. Add ProximityPrompts to resource nodes (INTEGRATION: P0 — harvestable)
+    print("[WorldGenerator] Step 4c: Adding resource prompts...")
+    addResourcePrompts()
 
     -- 6. Initialize tide system
     print("[WorldGenerator] Step 5/6: Initializing tide system...")

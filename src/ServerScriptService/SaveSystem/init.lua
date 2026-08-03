@@ -35,8 +35,8 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
--- Memory worker URL for save endpoints
-local MEMORY_URL = "https://lucineer-memory.casey-digennaro.workers.dev"
+-- NOTE: MEMORY_URL removed (Bug 1 fix). Http.post/get already prepends the
+-- configured worker URL. We pass paths only to avoid double-URL concatenation.
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -171,7 +171,7 @@ end
     @return boolean success
 ]]
 local function saveToR2(key, data)
-    local response, err = Http.post(MEMORY_URL .. "/api/save/r2/" .. key, {
+    local response, err = Http.post("/api/save/r2/" .. key, {
         key = key,
         data = jsonEncode(data),
     })
@@ -190,7 +190,7 @@ end
     @return table? -- decoded data, or nil if not found / error
 ]]
 local function loadFromR2(key)
-    local response, err = Http.get(MEMORY_URL .. "/api/save/r2/" .. key)
+    local response, err = Http.get("/api/save/r2/" .. key)
 
     if err then
         -- Non-fatal: could be first-time player with no saves
@@ -223,7 +223,7 @@ end
 ]]
 local function saveToD1(playerName, key, value)
     local dataStr = jsonEncode(value)
-    local _, err = Http.post(MEMORY_URL .. "/api/save/d1/" .. playerName .. "/" .. key, {
+    local _, err = Http.post("/api/save/d1/" .. playerName .. "/" .. key, {
         player_name = playerName,
         save_key = key,
         save_data = dataStr,
@@ -244,7 +244,7 @@ end
     @return any? -- decoded value, or nil if not found / error
 ]]
 local function loadFromD1(playerName, key)
-    local response, err = Http.get(MEMORY_URL .. "/api/save/d1/" .. playerName .. "/" .. key)
+    local response, err = Http.get("/api/save/d1/" .. playerName .. "/" .. key)
 
     if err or not response then
         return nil
@@ -602,6 +602,11 @@ local function savePlayer(playerName)
         return false
     end
 
+    -- Bug 3 fix: skip save if still loading (race condition guard)
+    if state.loading then
+        return false
+    end
+
     local success = true
 
     -- Save build snapshot to R2
@@ -654,6 +659,9 @@ local function saveBuilds(playerName)
     local state = playerSaveState[playerName]
     if not state then return false end
 
+    -- Bug 3 fix: skip save if still loading (race condition guard)
+    if state.loading then return false end
+
     -- Debounce: skip if saved within last 5 seconds
     local now = os.time()
     if state.lastBuildSave and (now - state.lastBuildSave) < 5 then
@@ -687,8 +695,10 @@ end
 ]]
 local function loadPlayer(playerName)
     -- Initialize state with defaults
+    -- Bug 3 fix: loading=true until R2 deserialization completes
     local state = {
-        loaded = true,
+        loaded = false,
+        loading = true,
         lastBuildSave = 0,
         inventory = {},
         eraData = { currentEra = 0, unlockedEras = { 0 }, eraXP = {} },

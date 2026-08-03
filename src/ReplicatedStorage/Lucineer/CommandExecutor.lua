@@ -34,6 +34,13 @@ local CollectionService = game:GetService("CollectionService")
 local Terrain = game:GetService("Workspace").Terrain
 local InsertService = game:GetService("InsertService")
 
+-- INTEGRATION: Structure tagging constants
+-- When CommandExecutor creates parts/models, they get tagged with
+-- CollectionService tags so WeatherSystem and other systems can find them.
+local STRUCTURE_TAG = "LucineerBuilt"
+local STRUCTURE_HEALTH_DEFAULT = 100
+local STRUCTURE_HEALTH_MAX = 100
+
 local BuildAnimator = require(script.Parent.BuildAnimator)
 local WorldScanner = require(script.Parent.WorldScanner)
 local BeatClock = require(script.Parent.BeatClock)
@@ -194,6 +201,21 @@ local function prepareBasePart(part: BasePart, params: { [string]: any }): BaseP
     CommandExecutor._partsCreated += 1
     WorldScanner.setBuildCount(CommandExecutor._partsCreated)
 
+    -- INTEGRATION: Tag this part as a Lucineer-built structure so
+    -- WeatherSystem (storm damage, wave damage, lightning) and other
+    -- systems can discover and interact with it.
+    CollectionService:AddTag(part, STRUCTURE_TAG)
+
+    -- Structure metadata: era, material, timestamp, health.
+    -- These attributes let WeatherSystem determine damage susceptibility,
+    -- reinforcement level, and collapse behavior.
+    part:SetAttribute("Era", params.era or 0)
+    part:SetAttribute("BuildMaterial", params.material or "SmoothPlastic")
+    part:SetAttribute("BuildTimestamp", os.time())
+    part:SetAttribute("Health", params.health or STRUCTURE_HEALTH_DEFAULT)
+    part:SetAttribute("MaxHealth", params.health or STRUCTURE_HEALTH_MAX)
+    part:SetAttribute("Reinforced", params.reinforced or false)
+
     -- Track for batch animation
     if inBatchMode then
         -- Store the target values on the part so BuildAnimator knows what to tween to.
@@ -329,6 +351,11 @@ end
 --[[
     createGroup: Parent multiple existing parts under a Model for organization.
     Expects: { name, partNames = { "PartA", "PartB", ... } }
+
+    INTEGRATION: The resulting Model is tagged as "Structure" (the tag
+    WeatherSystem looks for when applying storm/wave/lightning damage).
+    The Model gets Health/MaxHealth attributes and becomes a discoverable
+    game entity rather than a loose folder of parts.
 ]]
 function CommandExecutor.createGroup(params: { [string]: any }): Model
     local folder = ensureFolder()
@@ -336,10 +363,12 @@ function CommandExecutor.createGroup(params: { [string]: any }): Model
     model.Name = params.name or "LucineerGroup"
     model.Parent = folder
 
+    local partCount = 0
     for _, partName in ipairs(params.partNames or {}) do
         local part = findPartByName(partName)
         if part then
             part.Parent = model
+            partCount += 1
         else
             warn(string.format("[Lucineer] CommandExecutor: createGroup — part '%s' not found", tostring(partName)))
         end
@@ -351,13 +380,29 @@ function CommandExecutor.createGroup(params: { [string]: any }): Model
         model.PrimaryPart = primary
     end
 
-    print(string.format("[Lucineer] CommandExecutor: created Group '%s' with %d children", model.Name, #model:GetChildren()))
+    -- INTEGRATION: Tag the group as a Structure for WeatherSystem discovery.
+    -- Storm wave damage, lightning targeting, and wind force all query
+    -- CollectionService:GetTagged("Structure").
+    if partCount > 0 then
+        CollectionService:AddTag(model, "Structure")
+        model:SetAttribute("Era", params.era or 0)
+        model:SetAttribute("BuildMaterial", params.material or "Wood")
+        model:SetAttribute("BuildTimestamp", os.time())
+        model:SetAttribute("Health", params.health or STRUCTURE_HEALTH_DEFAULT)
+        model:SetAttribute("MaxHealth", params.health or STRUCTURE_HEALTH_MAX)
+        model:SetAttribute("Reinforced", params.reinforced or false)
+    end
+
+    print(string.format("[Lucineer] CommandExecutor: created Group '%s' with %d children (tagged Structure)", model.Name, partCount))
     return model
 end
 
 --[[
     createModel: Create a simple grouped model from multiple parts.
     Expects: { name, parts = { {name, position, size, ...}, ... } }
+
+    INTEGRATION: The resulting Model is tagged as "Structure" so that
+    WeatherSystem can apply storm/wave/lightning damage to it.
 ]]
 function CommandExecutor.createModel(params: { [string]: any }): Model
     local folder = ensureFolder()
@@ -365,13 +410,30 @@ function CommandExecutor.createModel(params: { [string]: any }): Model
     model.Name = params.name or "LucineerModel"
     model.Parent = folder
 
+    local partCount = 0
     for _, partData in ipairs(params.parts or {}) do
         partData.anchored = partData.anchored ~= false -- default anchored
         local part = CommandExecutor.createPart(partData)
         part.Parent = model
+        partCount += 1
     end
 
-    print(string.format("[Lucineer] CommandExecutor: created Model '%s' with %d parts", model.Name, #(params.parts or {})))
+    -- Tag the Model as a Structure for WeatherSystem integration.
+    if partCount > 0 then
+        local primary = model:FindFirstChildWhichIsA("BasePart")
+        if primary then
+            model.PrimaryPart = primary
+        end
+        CollectionService:AddTag(model, "Structure")
+        model:SetAttribute("Era", params.era or 0)
+        model:SetAttribute("BuildMaterial", params.material or "Wood")
+        model:SetAttribute("BuildTimestamp", os.time())
+        model:SetAttribute("Health", params.health or STRUCTURE_HEALTH_DEFAULT)
+        model:SetAttribute("MaxHealth", params.health or STRUCTURE_HEALTH_MAX)
+        model:SetAttribute("Reinforced", params.reinforced or false)
+    end
+
+    print(string.format("[Lucineer] CommandExecutor: created Model '%s' with %d parts (tagged Structure)", model.Name, partCount))
     return model
 end
 
