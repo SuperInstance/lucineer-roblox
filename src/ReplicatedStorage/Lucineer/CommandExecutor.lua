@@ -514,10 +514,14 @@ end
     - Each part emits a particle burst and material-aware sound on landing
     - The final part triggers a multi-colored completion burst
 
+    GAP #8b: Staggered placement — task.wait(0.08) every 3 parts so builds
+    arrive progressively instead of a single-frame pop-in.
+
     @param commands { { [string]: any } } -- array of command tables
+    @param onProgress ((current: number, total: number, result: any) -> ())? -- optional progress callback
     @return { { [string]: any } } -- array of { success, result, error } per command
 ]]
-function CommandExecutor.executeBatch(commands: { { [string]: any } }): { { [string]: any } }
+function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgress: ((number, number, any) -> ())?): { { [string]: any } }
     local results: { { [string]: any } } = {}
 
     -- Enter batch mode — created parts will be collected for deferred animation
@@ -533,6 +537,16 @@ function CommandExecutor.executeBatch(commands: { { [string]: any } }): { { [str
             result = result,
             error = err,
         })
+        -- Notify progress callback if provided
+        if onProgress then
+            task.spawn(onProgress, i, #commands, result)
+        end
+        -- Stagger placement: wait briefly every 3 parts so builds arrive
+        -- progressively rather than materializing in a single frame.
+        -- This gives the player a sense of active construction.
+        if i % 3 == 0 and i < #commands then
+            task.wait(0.08)
+        end
     end
 
     -- Exit batch mode

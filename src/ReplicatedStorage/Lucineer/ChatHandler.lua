@@ -36,6 +36,9 @@ ChatHandler._lastSubmitTime = {} :: { [number]: number }
 -- Track active (pending) jobs per server
 ChatHandler._activeJobCount = 0
 
+-- GAP #8b: Track which players have active thinking message rotation
+ChatHandler._pendingThinking = {} :: { [number]: boolean }
+
 --[[
     Set the callback for when an AI response is ready.
     @param callback (player: Player, response: { [string]: any }) -> ()
@@ -170,6 +173,35 @@ function ChatHandler.processMessage(player: Player, message: string)
         })
     end
 
+    -- GAP #8b: Start progressive thinking message rotation.
+    -- While the job is pending (brain is working), rotate thinking messages
+    -- every ~5 seconds so the player sees active progress instead of dead air.
+    local THINKING_MESSAGES = {
+        "Looking at the ground...",
+        "Checking what's already here...",
+        "Working on it...",
+        "Almost there...",
+    }
+    if thinkingRemote then
+        task.spawn(function()
+            local msgIndex = 1
+            -- Wait before first rotation (initial message already shown)
+            task.wait(5)
+            -- Keep rotating until the response handler stops us.
+            -- We use a flag on the player to track if the job is still pending.
+            local playerId = player.UserId
+            while ChatHandler._pendingThinking[playerId] do
+                thinkingRemote:FireClient(player, {
+                    thinking = true,
+                    text = THINKING_MESSAGES[msgIndex],
+                })
+                msgIndex = (msgIndex % #THINKING_MESSAGES) + 1
+                task.wait(5)
+            end
+        end)
+    end
+    ChatHandler._pendingThinking[player.UserId] = true
+
     -- Gather world state
     local worldState = WorldScanner.scan(player)
 
@@ -191,6 +223,7 @@ function ChatHandler.processMessage(player: Player, message: string)
         local response, err = Http.post("/api/message", payload)
         if err then
             warn(string.format("[Lucineer] ChatHandler: POST /api/message failed: %s", err))
+            ChatHandler._pendingThinking[player.UserId] = nil
             AudioManager.playUi("error")
             if ChatHandler._onResponse then
                 task.spawn(ChatHandler._onResponse, player, {
@@ -215,12 +248,16 @@ function ChatHandler.processMessage(player: Player, message: string)
             jobId,
             function(jobResponse: { [string]: any })
                 ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
+                -- GAP #8b: Stop progressive thinking rotation
+                ChatHandler._pendingThinking[player.UserId] = nil
                 if ChatHandler._onResponse then
                     task.spawn(ChatHandler._onResponse, player, jobResponse)
                 end
             end,
             function(jobErr: string)
                 ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
+                -- GAP #8b: Stop progressive thinking rotation
+                ChatHandler._pendingThinking[player.UserId] = nil
                 warn(string.format("[Lucineer] ChatHandler: job %s error: %s", jobId, jobErr))
                 AudioManager.playUi("error")
                 if ChatHandler._onResponse then
