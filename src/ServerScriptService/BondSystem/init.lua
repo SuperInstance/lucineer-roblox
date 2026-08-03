@@ -387,7 +387,10 @@ local function loadBond(playerName: string)
             return HttpService:RequestAsync({
                 Url = url,
                 Method = "GET",
-                Headers = { ["Content-Type"] = "application/json" },
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["X-Lucineer-Key"] = ServerConfig.AUTH_KEY,  -- Bug 2 fix
+                },
             })
         end)
 

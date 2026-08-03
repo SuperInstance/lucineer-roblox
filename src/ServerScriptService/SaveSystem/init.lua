@@ -33,7 +33,6 @@ local CommandExecutor = require(game:GetService("ReplicatedStorage"):WaitForChil
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
 
 -- NOTE: MEMORY_URL removed (Bug 1 fix). Http.post/get already prepends the
 -- configured worker URL. We pass paths only to avoid double-URL concatenation.
@@ -54,9 +53,6 @@ local SAVE_VERSION = 1             -- snapshot format version
 
 -- playerName → { loaded = true, lastBuildSave = os.time(), inventory = {}, eraData = {}, bondLevel = 0 }
 local playerSaveState = {}
-
--- Auto-save accumulator
-local autosaveAccumulator = 0
 
 -- Track loaded legacy builds for cleanup rotation
 local legacyBuilds = {}  -- array of { playerName = string, folder = Instance, timestamp = number }
@@ -513,7 +509,8 @@ local function scoreBuild(parts)
     local maxPos = Vector3.new(-math.huge, -math.huge, -math.huge)
 
     for _, part in ipairs(parts) do
-        materialSet[tostring(part.Material)] = true
+        local matName = part.Material.Name
+        materialSet[matName] = true
         minPos = Vector3.new(
             math.min(minPos.X, part.Position.X),
             math.min(minPos.Y, part.Position.Y),
@@ -752,6 +749,22 @@ end
     @return table? -- loaded state, or nil on total failure
 ]]
 local function loadPlayer(playerName)
+    -- Bug 6 fix: dissolve any existing legacy ghosts for this player
+    local legacyFolder = Workspace:FindFirstChild("LegacyBuilds")
+    if legacyFolder then
+        for _, ghost in ipairs(legacyFolder:GetChildren()) do
+            if ghost:GetAttribute("LegacyOwner") == playerName then
+                ghost:Destroy()
+            end
+        end
+    end
+    -- Also remove from the legacy tracking table
+    for i = #legacyBuilds, 1, -1 do
+        if legacyBuilds[i].playerName == playerName then
+            table.remove(legacyBuilds, i)
+        end
+    end
+
     -- Initialize state with defaults
     -- Bug 3 fix: loading=true until R2 deserialization completes
     local state = {
@@ -855,11 +868,11 @@ function SaveSystem.init()
         print(string.format("[SaveSystem] Player %s removed, state cleared", player.Name))
     end)
 
-    -- Auto-save heartbeat: save all players every AUTOSAVE_INTERVAL seconds
-    RunService.Heartbeat:Connect(function(dt)
-        autosaveAccumulator = autosaveAccumulator + dt
-        if autosaveAccumulator >= AUTOSAVE_INTERVAL then
-            autosaveAccumulator = 0
+    -- Auto-save loop: save all players every AUTOSAVE_INTERVAL seconds
+    -- Bug 8 fix: use task.wait() loop instead of Heartbeat accumulator (lighter weight)
+    task.spawn(function()
+        while true do
+            task.wait(AUTOSAVE_INTERVAL)
             saveAll()
         end
     end)
@@ -947,6 +960,183 @@ SaveSystem.deserializeBuilds = deserializeBuilds
     @param playerName string
 ]]
 SaveSystem.createLegacyBuild = createLegacyBuild
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- CLOUD SYNC API (Worker Save Endpoints)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+--[[
+    Sync a build snapshot to cloud storage via the R2 save endpoint.
+    POSTs to /api/save/r2/:key which stores the snapshot in the R2 bucket.
+
+    @param player Player|string -- Player instance or player name
+    @param snapshot table? -- pre-serialized snapshot (if nil, serializes from workspace)
+    @return boolean success
+]]
+function SaveSystem.syncToCloud(player, snapshot)
+    local playerName = typeof(player) == "Instance" and player.Name or player
+    local data = snapshot or serializeBuilds(playerName)
+    local key = "saves/" .. playerName .. "/builds.json"
+
+    local response, err = Http.post("/api/save/r2/" .. key, {
+        data = jsonEncode(data),
+    })
+
+    if err then
+        warn(string.format("[SaveSystem] syncToCloud failed for %s: %s", playerName, err))
+        return false
+    end
+
+    -- Update in-memory state timestamp
+    local state = playerSaveState[playerName]
+    if state then
+        state.lastBuildSave = os.time()
+    end
+
+    print(string.format("[SaveSystem] syncToCloud: %d parts saved for %s",
+        data.metadata and data.metadata.partCount or 0, playerName))
+    return true
+end
+
+--[[
+    Load a build snapshot from cloud storage via the R2 save endpoint.
+    GETs from /api/save/r2/:key and deserializes into the workspace.
+
+    @param player Player|string -- Player instance or player name
+    @return table? -- the loaded snapshot, or nil if not found / error
+]]
+function SaveSystem.loadFromCloud(player)
+    local playerName = typeof(player) == "Instance" and player.Name or player
+    local key = "saves/" .. playerName .. "/builds.json"
+
+    local response, err = Http.get("/api/save/r2/" .. key)
+
+    if err then
+        warn(string.format("[SaveSystem] loadFromCloud failed for %s: %s", playerName, err))
+        return nil
+    end
+
+    if not response or not response.data then
+        return nil
+    end
+
+    -- Decode the snapshot (worker returns data as JSON string)
+    local snapshot = jsonDecode(response.data)
+    if typeof(snapshot) == "string" then
+        -- Double-encoded fallback
+        snapshot = jsonDecode(snapshot)
+    end
+
+    if snapshot and snapshot.parts then
+        local restored = deserializeBuilds(snapshot, playerName)
+        print(string.format("[SaveSystem] loadFromCloud: restored %d parts for %s",
+            restored, playerName))
+    end
+
+    return snapshot
+end
+
+--[[
+    Save era progression to cloud via the /api/era/:player endpoint.
+    POSTs era data (currentEra, unlockedEras, eraXP) to the worker.
+
+    @param player Player|string -- Player instance or player name
+    @param eraData table? -- era data (if nil, reads from in-memory state)
+    @return boolean success
+]]
+function SaveSystem.saveEra(player, eraData)
+    local playerName = typeof(player) == "Instance" and player.Name or player
+    local data = eraData
+
+    -- Fall back to in-memory state if no eraData provided
+    if not data then
+        local state = playerSaveState[playerName]
+        data = state and state.eraData or nil
+    end
+
+    if not data then
+        warn(string.format("[SaveSystem] saveEra: no era data for %s", playerName))
+        return false
+    end
+
+    local _, err = Http.post("/api/era/" .. playerName, {
+        era_data = jsonEncode(data),
+    })
+
+    if err then
+        warn(string.format("[SaveSystem] saveEra failed for %s: %s", playerName, err))
+        return false
+    end
+
+    -- Update in-memory cache
+    local state = playerSaveState[playerName]
+    if state then
+        state.eraData = data
+    end
+
+    return true
+end
+
+--[[
+    Load era progression from cloud via the /api/era/:player endpoint.
+    GETs era data from the worker. Returns sensible defaults if not found.
+
+    @param player Player|string -- Player instance or player name
+    @return table -- { currentEra, unlockedEras, eraXP }
+]]
+function SaveSystem.loadEra(player)
+    local playerName = typeof(player) == "Instance" and player.Name or player
+
+    local response, err = Http.get("/api/era/" .. playerName)
+
+    if err or not response then
+        -- Return sensible defaults for new players
+        local defaults = {
+            currentEra = 0,
+            unlockedEras = { 0 },
+            eraXP = {},
+        }
+
+        -- Cache in memory
+        local state = playerSaveState[playerName]
+        if state then
+            state.eraData = defaults
+        end
+
+        return defaults
+    end
+
+    -- The worker returns era data in various possible shapes
+    local eraData
+    if response.era_data then
+        eraData = jsonDecode(response.era_data)
+    elseif response.data then
+        eraData = jsonDecode(response.data)
+    else
+        eraData = response
+    end
+
+    -- Double-encoded fallback
+    if typeof(eraData) == "string" then
+        eraData = jsonDecode(eraData)
+    end
+
+    -- Ensure required fields
+    if not eraData then
+        eraData = { currentEra = 0, unlockedEras = { 0 }, eraXP = {} }
+    end
+    eraData.currentEra = eraData.currentEra or 0
+    eraData.unlockedEras = eraData.unlockedEras or { 0 }
+    eraData.eraXP = eraData.eraXP or {}
+
+    -- Cache in memory
+    local state = playerSaveState[playerName]
+    if state then
+        state.eraData = eraData
+    end
+
+    return eraData
+end
 
 print("[SaveSystem] Module loaded — version " .. tostring(SAVE_VERSION))
 return SaveSystem
