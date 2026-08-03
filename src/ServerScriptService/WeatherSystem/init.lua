@@ -447,6 +447,161 @@ local function transitionLighting(profile, tweenTime)
 end
 
 ----------------------------------------------------------------
+-- INTERNAL: STORM STRUCTURE DAMAGE (LucineerBuilt integration)
+----------------------------------------------------------------
+
+--[[
+    Apply storm damage to LucineerBuilt structures near the shoreline.
+
+    This is the core integration between WeatherSystem and the building
+    system. When CommandExecutor creates parts/models, it tags them with
+    "LucineerBuilt" and sets Health/MaxHealth attributes. This function
+    finds those tagged parts during storms and applies progressive damage:
+
+    Stage 1 (health < 50%): Visual cracks (SurfaceLight flicker, color darken)
+    Stage 2 (health < 30%): Physical displacement (position offset)
+    Stage 3 (health <= 0):  Collapse (part falls, becomes debris, Destroyed attribute)
+
+    Reinforced structures (SetAttribute("Reinforced", true)) take reduced
+    damage and are immune to collapse.
+]]
+local function applyStormStructureDamage()
+    local waterLevel = 0
+    local tideSystem = Workspace:FindFirstChild("__TideSystem")
+    if tideSystem and tideSystem:GetAttribute("WaterLevel") then
+        waterLevel = tideSystem:GetAttribute("WaterLevel")
+    end
+
+    local damagedCount = 0
+    local collapsedCount = 0
+
+    -- Damage both individual LucineerBuilt parts and Structure-tagged Models
+    local parts = CollectionService:GetTagged("LucineerBuilt")
+    for _, part in ipairs(parts) do
+        if not part:IsA("BasePart") or not part.Parent then
+            -- Skip destroyed or non-part instances
+            goto continue
+        end
+
+        local pos = part.Position
+        local heightDiff = math.abs(pos.Y - waterLevel)
+
+        -- Only damage structures within wave damage radius of the shore
+        if heightDiff > STORM_CONFIG.waveDamageRadius then
+            goto continue
+        end
+
+        local isReinforced = part:GetAttribute("Reinforced") or false
+        local mat = part.Material
+        if STORM_CONFIG.reinforcedMaterials[mat.Name] then
+            isReinforced = true
+        end
+
+        local currentHealth = part:GetAttribute("Health")
+        local maxHealth = part:GetAttribute("MaxHealth")
+        if not currentHealth or not maxHealth then
+            goto continue
+        end
+
+        -- Calculate damage
+        local damage = STRUCTURE_STORM_CONFIG.structureWaveDamage
+        if isReinforced then
+            damage = damage / STRUCTURE_STORM_CONFIG.reinforcedHealthMult
+        end
+
+        local newHealth = math.max(0, currentHealth - damage)
+        local healthFrac = newHealth / maxHealth
+
+        -- Stage 1: Visual cracks — darken color and add a flickering SurfaceLight
+        if healthFrac <= STRUCTURE_STORM_CONFIG.crackThreshold then
+            -- Darken the part's color to simulate weathering/cracks
+            local baseColor = part.Color
+            local darkened = Color3.new(
+                baseColor.R * 0.7,
+                baseColor.G * 0.7,
+                baseColor.B * 0.7
+            )
+            part.Color = darkened
+
+            -- Add crack light if not present
+            if not part:FindFirstChild("StormCrackLight") then
+                local crackLight = Instance.new("SurfaceLight")
+                crackLight.Name = "StormCrackLight"
+                crackLight.Face = Enum.NormalId.Top
+                crackLight.Color = Color3.fromRGB(255, 200, 100)
+                crackLight.Range = 4
+                crackLight.Brightness = 0.5
+                crackLight.Parent = part
+
+                -- Flicker the light to simulate electrical damage
+                task.spawn(function()
+                    while crackLight and crackLight.Parent do
+                        crackLight.Brightness = math.random() * 0.8
+                        task.wait(0.1 + math.random() * 0.3)
+                    end
+                end)
+            end
+        end
+
+        -- Stage 2: Physical displacement — shift the part slightly
+        if healthFrac <= STRUCTURE_STORM_CONFIG.displacementThreshold and not isReinforced then
+            -- Only displace anchored parts (unanchored would be handled by wind force)
+            if part.Anchored then
+                local offset = Vector3.new(
+                    (math.random() - 0.5) * STRUCTURE_STORM_CONFIG.displacementAmount,
+                    0,
+                    (math.random() - 0.5) * STRUCTURE_STORM_CONFIG.displacementAmount
+                )
+                -- Only apply displacement once per damage stage
+                if not part:GetAttribute("StormDisplaced") then
+                    part.CFrame = part.CFrame + offset
+                    part:SetAttribute("StormDisplaced", true)
+                end
+            end
+        end
+
+        -- Stage 3: Collapse — destroy the structure
+        if newHealth <= 0 then
+            part:SetAttribute("Destroyed", true)
+
+            -- Make the part fall (unanchor + apply impulse)
+            part.Anchored = false
+            local collapseForce = Vector3.new(
+                (math.random() - 0.5) * 30,
+                -10,
+                (math.random() - 0.5) * 30
+            )
+            part:ApplyImpulse(collapseForce * part.AssemblyMass)
+
+            -- Spawn debris effect
+            Effects.spawnDebris(pos)
+
+            -- Remove after settling
+            game:GetService("Debris"):AddItem(part, 10)
+
+            -- Remove the LucineerBuilt tag so it's no longer targeted
+            CollectionService:RemoveTag(part, "LucineerBuilt")
+
+            collapsedCount += 1
+        else
+            damagedCount += 1
+        end
+
+        -- Update health attribute
+        part:SetAttribute("Health", newHealth)
+
+        -- Fire the storm damage event for other systems
+        stormDamageEvent:Fire(part, damage, newHealth, maxHealth)
+
+        ::continue::
+    end
+
+    if damagedCount > 0 or collapsedCount > 0 then
+        print(string.format("[WeatherSystem] Storm damage: %d damaged, %d collapsed", damagedCount, collapsedCount))
+    end
+end
+
+----------------------------------------------------------------
 -- INTERNAL: STORM MECHANICS
 ----------------------------------------------------------------
 
@@ -467,7 +622,12 @@ local function applyWindForce(dt)
     local parts = CollectionService:GetTagged("WeatherAffected")
     for _, part in ipairs(parts) do
         if part:IsA("BasePart") and not part.Anchored then
-            part:ApplyImpulse(force * (part.AssemblyMass))
+            -- Clamp assembly mass to avoid NaN/extreme values from welded assemblies
+            local mass = part.AssemblyMass
+            if mass == mass and mass > 0 then  -- NaN check and positivity
+                mass = math.clamp(mass, 0.1, 500)
+                part:ApplyImpulse(force * mass)
+            end
         end
     end
 end
@@ -837,6 +997,21 @@ local function transitionToWeather(newWeather, tweenTime)
         end
     end
 
+    -- INTEGRATION: Fire the WeatherAudioChange BindableEvent so AudioManager
+    -- (and any other consumer) can react to weather transitions. This carries
+    -- the weather type, intensity, and suggested music mode.
+    weatherAudioEvent:Fire({
+        weather = newWeather,
+        previous = WeatherSystem._previousWeather,
+        intensity = WEATHER_AUDIO_INTENSITY[newWeather] or 0,
+        windSpeed = WeatherSystem._windSpeed,
+        windDirection = WeatherSystem._windDirection,
+        musicMode = (newWeather == WEATHER_TYPES.STORM) and "storm"
+                     or (newWeather == WEATHER_TYPES.AURORA) and "aurora"
+                     or (newWeather == WEATHER_TYPES.RAIN) and "hub"
+                     or "hub",
+    })
+
     print(string.format("[WeatherSystem] Weather: %s → %s (duration: %.0fs)",
         WeatherSystem._previousWeather, newWeather, WeatherSystem._weatherDuration))
 end
@@ -893,6 +1068,8 @@ local function onHeartbeat(dt)
         if WeatherSystem._waveDamageTimer >= STORM_CONFIG.waveDamageInterval then
             WeatherSystem._waveDamageTimer = 0
             applyWaveDamage()
+            -- INTEGRATION: Also damage LucineerBuilt structures (player builds)
+            applyStormStructureDamage()
         end
 
         -- Lightning strikes

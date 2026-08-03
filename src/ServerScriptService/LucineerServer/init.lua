@@ -318,6 +318,13 @@ local function init()
     PowerGrid.init()
     SaveSystem.init()
     TutorialSystem.init()
+
+    -- INTEGRATION: Generate the world before WeatherSystem starts so that
+    -- terrain, resource nodes, spawn points, and ProximityPrompts exist
+    -- before weather can damage structures.
+    local WorldGenerator = require(script.Parent:WaitForChild("WorldGenerator"))
+    WorldGenerator.Generate("single")
+
     WeatherSystem.init()
 
     -- Wire AI responses

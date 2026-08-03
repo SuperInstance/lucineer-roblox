@@ -160,6 +160,23 @@ local function parseVector3(t)
     return Vector3.new(t.x or t[1] or 0, t.y or t[2] or 0, t.z or t[3] or 0)
 end
 
+--[[
+    Get or create a per-player sub-folder inside LucineerBuilds.
+    Bug 4 fix: each player gets their own folder for ownership isolation.
+    @param playerName string
+    @return Folder
+]]
+local function ensurePlayerBuildFolder(playerName)
+    local folder = ensureBuildsFolder()
+    local playerFolder = folder:FindFirstChild(playerName)
+    if not playerFolder then
+        playerFolder = Instance.new("Folder")
+        playerFolder.Name = playerName
+        playerFolder.Parent = folder
+    end
+    return playerFolder
+end
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- R2 PERSISTENCE (via memory worker)
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -730,11 +747,14 @@ local function loadPlayer(playerName)
     task.spawn(function()
         local buildSnapshot = loadFromR2("saves/" .. playerName .. "/builds.json")
         if buildSnapshot and buildSnapshot.parts then
-            local restored = deserializeBuilds(buildSnapshot)
+            local restored = deserializeBuilds(buildSnapshot, playerName)
             print(string.format("[SaveSystem] Loaded %d parts for %s from R2", restored, playerName))
         else
             print(string.format("[SaveSystem] No build snapshot for %s (new player or first session)", playerName))
         end
+        -- Bug 3 fix: mark as fully loaded — saves can now proceed
+        state.loading = false
+        state.loaded = true
     end)
 
     print(string.format("[SaveSystem] Profile loaded for %s (era %d, bond %d)",
