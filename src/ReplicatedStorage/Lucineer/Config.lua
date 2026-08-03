@@ -19,8 +19,8 @@ Config.SESSION_ID = string.format("%d-%s", game.PlaceId,
 
 -- Polling
 Config.POLL_INTERVAL = 0.5      -- seconds between job status polls
-Config.POLL_TIMEOUT = 180        -- seconds before a job is considered timed out
--- NOTE: Must exceed the brain's DEEP_TIMEOUT (120s) so deep builds aren't abandoned.
+Config.POLL_TIMEOUT = 120        -- seconds before a job is considered timed out
+-- NOTE: Must exceed the brain's DEEP_TIMEOUT (100s) so deep builds aren't abandoned.
 
 -- State sync
 Config.STATE_SYNC_INTERVAL = 10  -- seconds between full world-state syncs

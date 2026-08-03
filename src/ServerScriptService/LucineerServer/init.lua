@@ -143,7 +143,7 @@ local function startThinkingRotation(player: Player)
     thinkingRotations[player] = task.spawn(function()
         -- Immediate first message (beyond the initial "Lucineer is thinking...")
         task.wait(5)
-        while thinkingRotations[player] do
+        while thinkingRotations[player] == coroutine.running() do
             ThinkingRemote:FireClient(player, {
                 thinking = true,
                 text = THINKING_MESSAGES[msgIndex],
@@ -212,7 +212,15 @@ local function handleResponse(player: Player, response: { [string]: any })
 
         -- Execute via CommandExecutor (internally routes through BuildAnimator
         -- for staggered cinematic reveal of created parts)
-        local results = CommandExecutor.executeBatch(commands)
+        -- GAP #8: Pass onProgress callback to update thinking text during build.
+        local function onBuildProgress(current: number, total: number, _: any)
+            ThinkingRemote:FireClient(player, {
+                thinking = true,
+                text = string.format("Placing piece %d of %d...", current, total),
+            })
+        end
+
+        local results = CommandExecutor.executeBatch(commands, onBuildProgress)
 
         -- Stop thinking cue — build is done
         AudioManager.stopThinking()
@@ -282,6 +290,7 @@ local function handleResponse(player: Player, response: { [string]: any })
     -- if response.lua then ... end
 
     -- Done thinking
+    stopThinkingRotation(player)
     ThinkingRemote:FireClient(player, { thinking = false })
 end
 

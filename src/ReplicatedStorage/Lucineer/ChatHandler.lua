@@ -237,6 +237,7 @@ function ChatHandler.processMessage(player: Player, message: string)
         local jobId = response.jobId or response.job_id or response.id
         if not jobId then
             -- Immediate response (no async job)
+            ChatHandler._pendingThinking[player.UserId] = nil
             if ChatHandler._onResponse then
                 task.spawn(ChatHandler._onResponse, player, response)
             end
