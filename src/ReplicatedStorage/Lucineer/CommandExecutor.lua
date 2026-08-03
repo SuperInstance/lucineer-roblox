@@ -2,7 +2,7 @@
     Lucineer Command Executor
     Receives structured build commands from the AI and executes them in the workspace.
     Supports: createPart, createModel, deletePart, movePart, addLight, addSound,
-              addScript (Studio-only), setTerrain, sendMessage
+              addParticle, addScript (Studio-only), setTerrain, sendMessage
 
     GAP #9 Fixes:
       9a: runLua removed entirely — loadstring is unsafe and disabled by default.
@@ -33,6 +33,7 @@ local InsertService = game:GetService("InsertService")
 
 local BuildAnimator = require(script.Parent.BuildAnimator)
 local WorldScanner = require(script.Parent.WorldScanner)
+local BeatClock = require(script.Parent.BeatClock)
 
 local CommandExecutor = {}
 
@@ -157,12 +158,32 @@ function CommandExecutor.createPart(params: { [string]: any }): Instance
     local targetSize = parseVector3(params.size or { x = 4, y = 1, z = 4 })
     local targetTransparency = params.transparency or 0
 
-    part.Position = targetPosition
     part.Size = targetSize
     part.Material = parseMaterial(params.material)
     part.Color = parseColor(params.color)
     part.Anchored = if params.anchored ~= nil then params.anchored else true
     part.Transparency = targetTransparency
+
+    -- SPATIAL: apply rotation and optional physics flags from generator.
+    -- Rotation is in degrees {x, y, z} and pivots around the part's position.
+    local rotation = params.rotation
+    if type(rotation) == "table" then
+        part.CFrame = CFrame.new(targetPosition)
+            * CFrame.Angles(
+                math.rad(rotation.x or rotation[1] or 0),
+                math.rad(rotation.y or rotation[2] or 0),
+                math.rad(rotation.z or rotation[3] or 0)
+            )
+    else
+        part.Position = targetPosition
+    end
+
+    if params.canCollide ~= nil then
+        part.CanCollide = params.canCollide
+    end
+    if params.reflectance ~= nil then
+        part.Reflectance = params.reflectance
+    end
 
     if params.shape then
         local ok = pcall(function()
@@ -343,6 +364,85 @@ function CommandExecutor.addSound(params: { [string]: any }): Instance
 end
 
 --[[
+    addParticle: Attach a particle system to a named part.
+    Expects: { parent, texture, rate, lifetime {min, max}, speed {min, max},
+               color, size {min, max}, transparency, velocity {x, y, z} }
+
+    The templates use this for smoke, embers, fog, water spray, butterflies,
+    and magical sparkles. Without this handler those effects silently vanish.
+]]
+function CommandExecutor.addParticle(params: { [string]: any }): Instance?
+    local parentName = params.parent
+    if not parentName then
+        warn("[Lucineer] CommandExecutor: addParticle missing 'parent'")
+        return nil
+    end
+
+    local parent = findPartByName(parentName)
+    if not parent then
+        warn(string.format("[Lucineer] CommandExecutor: addParticle — parent '%s' not found", parentName))
+        return nil
+    end
+
+    -- Resolve to a BasePart we can attach to
+    local attachParent: BasePart
+    if parent:IsA("BasePart") then
+        attachParent = parent
+    elseif parent:IsA("Light") and parent.Parent and parent.Parent:IsA("BasePart") then
+        attachParent = parent.Parent
+    elseif parent:IsA("Model") then
+        attachParent = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart") :: BasePart
+    end
+
+    if not attachParent then
+        warn(string.format("[Lucineer] CommandExecutor: addParticle — cannot attach to '%s'", parentName))
+        return nil
+    end
+
+    local lifetime = params.lifetime or { min = 1, max = 2 }
+    local speed = params.speed or { min = 1, max = 2 }
+    local size = params.size or { min = 0.5, max = 1 }
+    local transparency = params.transparency or 0.3
+
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = params.name or "LucineerParticles"
+    emitter.Texture = params.texture or "rbxasset://textures/particles/sparkles_main.dds"
+    emitter.Rate = params.rate or 10
+    emitter.Lifetime = NumberRange.new(lifetime.min or 1, lifetime.max or 2)
+    emitter.Speed = NumberRange.new(speed.min or 1, speed.max or 2)
+    emitter.Size = NumberSequence.new(size.min or 0.5, size.max or 1)
+    emitter.Color = ColorSequence.new(parseColor(params.color or "#FFFFFF"))
+    emitter.Transparency = NumberSequence.new(transparency, transparency)
+    emitter.SpreadAngle = Vector2.new(10, 10)
+
+    -- Optional velocity direction: use magnitude to bias speed upward-ish
+    local velocity = params.velocity
+    if type(velocity) == "table" then
+        local v = Vector3.new(velocity.x or 0, velocity.y or 0, velocity.z or 0)
+        local mag = v.Magnitude
+        if mag > 0 then
+            emitter.Speed = NumberRange.new(mag * 0.8, mag * 1.2)
+            -- Point the attachment so the emission favors the velocity direction
+            local attachment = Instance.new("Attachment")
+            attachment.Name = "ParticleAttachment"
+            attachment.CFrame = CFrame.lookAt(Vector3.zero, v)
+            attachment.Parent = attachParent
+            emitter.Parent = attachment
+            print(string.format("[Lucineer] CommandExecutor: added ParticleEmitter '%s' to '%s' (velocity-driven)", emitter.Name, parentName))
+            return emitter
+        end
+    end
+
+    local attachment = Instance.new("Attachment")
+    attachment.Name = "ParticleAttachment"
+    attachment.Parent = attachParent
+    emitter.Parent = attachment
+
+    print(string.format("[Lucineer] CommandExecutor: added ParticleEmitter '%s' to '%s'", emitter.Name, parentName))
+    return emitter
+end
+
+--[[
     GAP #9b: addScript — Studio-only.
     Script.Source is only assignable from plugins and the command bar (Studio).
     At runtime in a published game, this raises an error. Guard with RunService:IsStudio().
@@ -452,6 +552,7 @@ local commandMap: { [string]: ({ [string]: any }) -> any } = {
     movePart = CommandExecutor.movePart,
     addLight = CommandExecutor.addLight,
     addSound = CommandExecutor.addSound,
+    addParticle = CommandExecutor.addParticle,
     addScript = CommandExecutor.addScript,
     setTerrain = CommandExecutor.setTerrain,
     sendMessage = CommandExecutor.sendMessage,
@@ -514,8 +615,10 @@ end
     - Each part emits a particle burst and material-aware sound on landing
     - The final part triggers a multi-colored completion burst
 
-    GAP #8b: Staggered placement — task.wait(0.08) every 3 parts so builds
-    arrive progressively instead of a single-frame pop-in.
+    GAP #8b: Staggered placement — creation is throttled to one musical
+    32nd-note every 3 parts so builds stream in rather than popping.
+    BuildAnimator handles the actual reveal curve (drop + bounce, spatial
+    ordering, and BeatClock-derived stagger).
 
     @param commands { { [string]: any } } -- array of command tables
     @param onProgress ((current: number, total: number, result: any) -> ())? -- optional progress callback
@@ -527,6 +630,8 @@ function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgres
     -- Enter batch mode — created parts will be collected for deferred animation
     inBatchMode = true
     batchCreatedParts = {}
+
+    local createStagger = math.max(0.03, BeatClock.get32ndNoteDuration())
 
     for i, command in ipairs(commands) do
         local result, err = CommandExecutor.execute(command)
@@ -541,11 +646,10 @@ function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgres
         if onProgress then
             task.spawn(onProgress, i, #commands, result)
         end
-        -- Stagger placement: wait briefly every 3 parts so builds arrive
-        -- progressively rather than materializing in a single frame.
-        -- This gives the player a sense of active construction.
+        -- Throttle creation slightly every 3 parts to keep the main thread
+        -- responsive and preserve the feeling of sequential construction.
         if i % 3 == 0 and i < #commands then
-            task.wait(0.08)
+            task.wait(createStagger)
         end
     end
 
@@ -554,37 +658,11 @@ function CommandExecutor.executeBatch(commands: { { [string]: any } }, onProgres
 
     -- If we collected parts during the batch, animate them with staggered timing
     if #batchCreatedParts > 0 then
-        -- Compute the center position of all created parts for completion burst
-        local sumVec = Vector3.new(0, 0, 0)
-        for _, part in ipairs(batchCreatedParts) do
-            sumVec = sumVec + part.Position
-        end
-        local centerPosition = sumVec / #batchCreatedParts
-
-        -- Restore target sizes before animating (BuildAnimator.animateBatch reads part.Size as target)
-        for _, part in ipairs(batchCreatedParts) do
-            local tx = part:GetAttribute("BA_TargetSizeX")
-            local ty = part:GetAttribute("BA_TargetSizeY")
-            local tz = part:GetAttribute("BA_TargetSizeZ")
-            local ttrans = part:GetAttribute("BA_TargetTransparency")
-
-            if tx then
-                local targetSize = Vector3.new(tx, ty, tz)
-                part.Size = targetSize
-                part.Transparency = ttrans or 0
-
-                -- Clean up attributes
-                part:RemoveAttribute("BA_TargetSizeX")
-                part:RemoveAttribute("BA_TargetSizeY")
-                part:RemoveAttribute("BA_TargetSizeZ")
-                part:RemoveAttribute("BA_TargetTransparency")
-            end
-        end
-
         local partCount = #batchCreatedParts
 
-        -- Now pass the full list to BuildAnimator for the staggered cinematic reveal
-        BuildAnimator.animateBatch(batchCreatedParts, centerPosition)
+        -- BuildAnimator reads the target Size/Transparency from attributes,
+        -- sorts parts spatially, and runs the reveal curve.
+        BuildAnimator.animateBatch(batchCreatedParts)
 
         -- Clear the tracking list
         table.clear(batchCreatedParts)

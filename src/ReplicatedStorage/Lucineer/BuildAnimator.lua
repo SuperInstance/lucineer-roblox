@@ -6,10 +6,13 @@
 
     Cinematic part reveal system. Sits between command receipt and the
     CommandExecutor's instant part creation. Instead of parts popping into
-    existence, each part fades and scales in with a Back-ease bounce,
-    emits a colored spark burst, and plays a material-appropriate sound —
-    staggered so a 17-part castle streams in over ~1.4s like Lucineer is
-    actively building it.
+    existence, each part drops from above and settles with a Bounce ease,
+    fades and scales in with a Back-ease bounce, emits a colored spark burst,
+    and plays a material-appropriate sound — staggered so a 17-part castle
+    streams in over ~1.4s like Lucineer is actively building it.
+
+    Spatial ordering: parts are revealed foundation-up / center-out so the
+    animation sweeps across the build rather than jumping around.
 
     INTEGRATION
     ───────────────────────────────────────────────
@@ -34,6 +37,9 @@ local Players = game:GetService("Players")
 
 local BuildAnimator = {}
 
+-- Shared musical clock. If uninitialized we fall back to 72 BPM (Andante).
+local BeatClock = require(script.Parent.BeatClock)
+
 ----------------------------------------------------------------
 -- CONFIG
 ----------------------------------------------------------------
@@ -45,11 +51,20 @@ local DEFAULT_STAGGER = 0.08
 
 local CONFIG = {
     -- Per-part fade/scale tween
-    PART_TWEEN_TIME = 0.3,
+    PART_TWEEN_TIME = 0.32,
     SIZE_EASING_STYLE = Enum.EasingStyle.Back,
     SIZE_EASING_DIRECTION = Enum.EasingDirection.Out,
     TRANS_EASING_STYLE = Enum.EasingStyle.Quad,
     TRANS_EASING_DIRECTION = Enum.EasingDirection.Out,
+
+    -- "scale"  = parts grow in place (classic pop-in replacement)
+    -- "drop"   = parts fall from above and settle with a bounce
+    ANIMATION_STYLE = "drop",
+
+    -- Drop-in trajectory
+    DROP_HEIGHT = 10,                         -- studs above final position
+    DROP_EASING_STYLE = Enum.EasingStyle.Bounce,
+    DROP_EASING_DIRECTION = Enum.EasingDirection.Out,
 
     -- Staggered streaming (legacy constant; overridden by getStagger when BPM is known)
     STAGGER_DELAY = DEFAULT_STAGGER,
@@ -59,21 +74,27 @@ local CONFIG = {
 
     -- Particle burst (per-part landing)
     LANDING_PARTICLE_COUNT = 8,
-    LANDING_PARTICLE_LIFETIME = 0.3,
+    LANDING_PARTICLE_LIFETIME = 0.35,
     LANDING_PARTICLE_SPEED = 4,
     LANDING_PARTICLE_SPREAD = 0.15,
     LANDING_PARTICLE_SIZE = 0.08,
 
     -- Completion burst (last part in batch)
-    COMPLETION_PARTICLE_COUNT = 25,
-    COMPLETION_PARTICLE_LIFETIME = 0.8,
+    COMPLETION_PARTICLE_COUNT = 28,
+    COMPLETION_PARTICLE_LIFETIME = 0.9,
     COMPLETION_PARTICLE_SPEED = 8,
     COMPLETION_PARTICLE_SIZE = 0.12,
 
     -- Camera focus (client-side, opt-in via player parameter)
-    CAMERA_FOCUS_RANGE = 50,       -- studs — only focus if player within this distance
-    CAMERA_FOCUS_TIME = 0.6,
+    CAMERA_FOCUS_RANGE = 80,       -- studs — only focus if player within this distance
+    CAMERA_FOCUS_TIME = 0.7,
     CAMERA_RETURN_DELAY = 1.5,
+
+    -- Spatial ordering: how parts are sequenced in a batch
+    -- "height_then_distance" = foundation up, then outward (most architectural)
+    -- "distance"             = center-out wave
+    -- "none"                 = preserve command order
+    BATCH_SORT_MODE = "height_then_distance",
 }
 
 ----------------------------------------------------------------
@@ -256,6 +277,123 @@ local function getSoundIdForMaterial(material: Enum.Material): string
 end
 
 --[[
+    Read target size/transparency stored on a part by CommandExecutor.
+    Returns the target values and removes the attributes so they don't
+    linger on the instance. If no attributes exist, returns current values.
+]]
+local function readTargetAttributes(part: BasePart): (Vector3, number)
+    local tx = part:GetAttribute("BA_TargetSizeX")
+    local ty = part:GetAttribute("BA_TargetSizeY")
+    local tz = part:GetAttribute("BA_TargetSizeZ")
+    local targetSize = if tx and ty and tz
+        then Vector3.new(tx, ty, tz)
+        else part.Size
+    local targetTransparency = part:GetAttribute("BA_TargetTransparency") or part.Transparency
+
+    part:RemoveAttribute("BA_TargetSizeX")
+    part:RemoveAttribute("BA_TargetSizeY")
+    part:RemoveAttribute("BA_TargetSizeZ")
+    part:RemoveAttribute("BA_TargetTransparency")
+
+    return targetSize, targetTransparency
+end
+
+--[[
+    Compute the axis-aligned bounding box of an array of BaseParts.
+    Uses target-size attributes if present (parts may be in pre-animation
+    shrunken state), otherwise uses current Size.
+    Returns min, max, center, and size.
+]]
+local function calculateBounds(parts: { BasePart }): (Vector3, Vector3, Vector3, Vector3)
+    local function getPartSize(p: BasePart): Vector3
+        local tx = p:GetAttribute("BA_TargetSizeX")
+        local ty = p:GetAttribute("BA_TargetSizeY")
+        local tz = p:GetAttribute("BA_TargetSizeZ")
+        if tx and ty and tz then
+            return Vector3.new(tx, ty, tz)
+        end
+        return p.Size
+    end
+
+    local minVec = parts[1].Position
+    local maxVec = parts[1].Position
+    for i = 2, #parts do
+        local p = parts[i]
+        minVec = Vector3.new(
+            math.min(minVec.X, p.Position.X),
+            math.min(minVec.Y, p.Position.Y),
+            math.min(minVec.Z, p.Position.Z)
+        )
+        maxVec = Vector3.new(
+            math.max(maxVec.X, p.Position.X),
+            math.max(maxVec.Y, p.Position.Y),
+            math.max(maxVec.Z, p.Position.Z)
+        )
+    end
+    -- Include part extents (Position is center, not corner)
+    for _, p in ipairs(parts) do
+        local half = getPartSize(p) * 0.5
+        minVec = Vector3.new(
+            math.min(minVec.X, p.Position.X - half.X),
+            math.min(minVec.Y, p.Position.Y - half.Y),
+            math.min(minVec.Z, p.Position.Z - half.Z)
+        )
+        maxVec = Vector3.new(
+            math.max(maxVec.X, p.Position.X + half.X),
+            math.max(maxVec.Y, p.Position.Y + half.Y),
+            math.max(maxVec.Z, p.Position.Z + half.Z)
+        )
+    end
+    local center = (minVec + maxVec) * 0.5
+    local size = maxVec - minVec
+    return minVec, maxVec, center, size
+end
+
+--[[
+    Sort parts into a cinematic build order.
+    "height_then_distance" lays foundations first, then rises, then expands outward.
+    "distance" radiates from the build center in waves.
+    "none" leaves the array unchanged.
+]]
+local function sortPartsSpatially(parts: { BasePart }, center: Vector3): { BasePart }
+    if CONFIG.BATCH_SORT_MODE == "none" then
+        return parts
+    end
+
+    local sorted = table.clone(parts)
+    if CONFIG.BATCH_SORT_MODE == "distance" then
+        table.sort(sorted, function(a, b)
+            return (a.Position - center).Magnitude < (b.Position - center).Magnitude
+        end)
+    else
+        -- height_then_distance: ascending Y, then horizontal distance
+        table.sort(sorted, function(a, b)
+            local dy = a.Position.Y - b.Position.Y
+            if math.abs(dy) > 0.1 then
+                return dy < 0
+            end
+            local ah = Vector3.new(a.Position.X, 0, a.Position.Z)
+            local bh = Vector3.new(b.Position.X, 0, b.Position.Z)
+            local ch = Vector3.new(center.X, 0, center.Z)
+            return (ah - ch).Magnitude < (bh - ch).Magnitude
+        end)
+    end
+    return sorted
+end
+
+--[[
+    Musical stagger: use the shared BeatClock when available, otherwise
+    fall back to the legacy constant.
+]]
+local function getCurrentStagger(): number
+    local bpm = BeatClock.getBPM()
+    if bpm and bpm > 0 then
+        return BuildAnimator.getStagger(bpm)
+    end
+    return CONFIG.STAGGER_DELAY
+end
+
+--[[
     Create a one-shot particle burst at a world position.
 
     Creates an invisible carrier part with an Attachment + ParticleEmitter,
@@ -343,23 +481,33 @@ end
     @param part BasePart -- the part to animate (must be parented)
     @param targetTransparency number? -- final transparency (defaults to part's current value)
 ]]
-function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
+function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?, style: string?)
     if not part or typeof(part) ~= "Instance" or not part:IsA("BasePart") then
         warn("[Lucineer] BuildAnimator.animatePart: expected a BasePart, got " .. tostring(part))
         return
     end
 
-    -- Record target values BEFORE squashing
-    local targetSize = part.Size
-    local targetTrans = targetTransparency or part.Transparency
+    -- Read target values stored by CommandExecutor (or current values as fallback)
+    local targetSize, targetTrans = readTargetAttributes(part)
+    if targetTransparency then
+        targetTrans = targetTransparency
+    end
     local partColor = part.Color
     local partMaterial = part.Material
     local landingPos = part.Position
+    local animStyle = style or CONFIG.ANIMATION_STYLE
 
     acquireSlot(function()
         -- Snap to invisible / tiny
         part.Transparency = 1
         part.Size = Vector3.new(0.1, 0.1, 0.1)
+
+        local startPos = landingPos
+        local positionTween: Tween? = nil
+        if animStyle == "drop" then
+            startPos = landingPos + Vector3.new(0, CONFIG.DROP_HEIGHT, 0)
+            part.CFrame = CFrame.new(startPos) * (part.CFrame - part.CFrame.Position)
+        end
 
         local completed = false
 
@@ -379,6 +527,16 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
         )
         local transTween = TweenService:Create(part, transInfo, { Transparency = targetTrans })
 
+        -- Optional drop trajectory (Bounce ease — weighty landing)
+        if animStyle == "drop" then
+            local dropInfo = TweenInfo.new(
+                CONFIG.PART_TWEEN_TIME * 1.1,
+                CONFIG.DROP_EASING_STYLE,
+                CONFIG.DROP_EASING_DIRECTION
+            )
+            positionTween = TweenService:Create(part, dropInfo, { Position = landingPos })
+        end
+
         -- Landing effects when the size tween completes
         sizeTween.Completed:Connect(function(playbackState)
             if completed then return end
@@ -386,6 +544,13 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
             releaseSlot()
 
             if playbackState == Enum.PlaybackState.Completed then
+                -- Ensure final CFrame is exact
+                pcall(function()
+                    part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
+                    part.Size = targetSize
+                    part.Transparency = targetTrans
+                end)
+
                 -- Particle burst at the part's center
                 createParticleBurst(
                     landingPos,
@@ -407,9 +572,9 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
             if not completed then
                 completed = true
                 releaseSlot()
-                -- Ensure the part is at least visible at its target state
                 pcall(function()
                     if part and part.Parent then
+                        part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
                         part.Size = targetSize
                         part.Transparency = targetTrans
                     end
@@ -420,6 +585,9 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
         -- Play tweens with pcall guard
         local ok1 = pcall(function() sizeTween:Play() end)
         local ok2 = pcall(function() transTween:Play() end)
+        if positionTween then
+            pcall(function() positionTween:Play() end)
+        end
 
         if not ok1 or not ok2 then
             -- TweenService failed — restore immediately
@@ -427,6 +595,7 @@ function BuildAnimator.animatePart(part: BasePart, targetTransparency: number?)
                 completed = true
                 releaseSlot()
                 pcall(function()
+                    part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
                     part.Size = targetSize
                     part.Transparency = targetTrans
                 end)
@@ -505,16 +674,24 @@ function BuildAnimator.animateBatch(
         return
     end
 
-    centerPosition = centerPosition or parts[1].Position
+    -- Compute the real bounding box so we can frame the camera and center
+    -- the completion burst on the build's actual volume, not just the
+    -- arithmetic mean of part centers.
+    local _, _, boundsCenter, boundsSize = calculateBounds(parts)
+    centerPosition = centerPosition or boundsCenter
+
+    -- Sort parts into a cinematic build order (foundation first, then up/out)
+    parts = sortPartsSpatially(parts, centerPosition)
 
     -- Camera focus (client-side, only if player is within range)
     if player and RunService:IsClient() then
-        BuildAnimator._focusCamera(centerPosition, player)
+        BuildAnimator._focusCamera(centerPosition, player, boundsSize)
     end
 
-    -- Stagger each part's reveal
+    -- Stagger each part's reveal, driven by the musical clock
+    local stagger = getCurrentStagger()
     for i, part in ipairs(parts) do
-        local delay = (i - 1) * CONFIG.STAGGER_DELAY
+        local delay = (i - 1) * stagger
 
         task.delay(delay, function()
             local isLast = (i == count)
@@ -539,16 +716,31 @@ end
 function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition: Vector3)
     if not part or not part:IsA("BasePart") then return end
 
-    local targetSize = part.Size
-    local targetTrans = part.Transparency
+    local targetSize, targetTrans = readTargetAttributes(part)
     local partColor = part.Color
     local partMaterial = part.Material
     local landingPos = part.Position
+    local animStyle = CONFIG.ANIMATION_STYLE
 
     acquireSlot(function()
         -- Snap to invisible / tiny
         part.Transparency = 1
         part.Size = Vector3.new(0.1, 0.1, 0.1)
+
+        local positionTween: Tween? = nil
+        if animStyle == "drop" then
+            local startPos = landingPos + Vector3.new(0, CONFIG.DROP_HEIGHT, 0)
+            part.CFrame = CFrame.new(startPos) * (part.CFrame - part.CFrame.Position)
+            positionTween = TweenService:Create(
+                part,
+                TweenInfo.new(
+                    CONFIG.PART_TWEEN_TIME * 1.1,
+                    CONFIG.DROP_EASING_STYLE,
+                    CONFIG.DROP_EASING_DIRECTION
+                ),
+                { Position = landingPos }
+            )
+        end
 
         local completed = false
 
@@ -578,6 +770,13 @@ function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition
             releaseSlot()
 
             if playbackState == Enum.PlaybackState.Completed then
+                -- Ensure final CFrame is exact
+                pcall(function()
+                    part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
+                    part.Size = targetSize
+                    part.Transparency = targetTrans
+                end)
+
                 -- Standard landing burst for this part
                 createParticleBurst(
                     landingPos,
@@ -635,6 +834,7 @@ function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition
                 releaseSlot()
                 pcall(function()
                     if part and part.Parent then
+                        part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
                         part.Size = targetSize
                         part.Transparency = targetTrans
                     end
@@ -644,12 +844,16 @@ function BuildAnimator._animatePartWithCompletion(part: BasePart, centerPosition
 
         local ok1 = pcall(function() sizeTween:Play() end)
         local ok2 = pcall(function() transTween:Play() end)
+        if positionTween then
+            pcall(function() positionTween:Play() end)
+        end
 
         if not ok1 or not ok2 then
             if not completed then
                 completed = true
                 releaseSlot()
                 pcall(function()
+                    part.CFrame = CFrame.new(landingPos) * (part.CFrame - part.CFrame.Position)
                     part.Size = targetSize
                     part.Transparency = targetTrans
                 end)
@@ -729,7 +933,7 @@ end
     @param position Vector3 -- center of the build to frame
     @param player Player -- the player to check proximity for
 ]]
-function BuildAnimator._focusCamera(position: Vector3, player: Player)
+function BuildAnimator._focusCamera(position: Vector3, player: Player?, buildSize: Vector3?)
     if not RunService:IsClient() then return end
     if not player then
         player = Players.LocalPlayer
@@ -751,8 +955,14 @@ function BuildAnimator._focusCamera(position: Vector3, player: Player)
     local camera = workspace.CurrentCamera
     if not camera then return end
 
-    -- Frame the build: offset back and up, looking at center
-    local offset = Vector3.new(0, 15, 25)
+    -- Frame the build using its real volume. A castle needs more distance
+    -- than a flower box. Build a diagonal from the horizontal footprint and
+    -- height, then pull back enough to keep the whole thing in view.
+    local size = buildSize or Vector3.new(10, 10, 10)
+    local horizontal = math.sqrt(size.X * size.X + size.Z * size.Z)
+    local backDistance = math.max(25, horizontal * 1.1)
+    local upDistance = math.max(15, size.Y * 0.6)
+    local offset = Vector3.new(0, upDistance, backDistance)
     local targetCFrame = CFrame.lookAt(position + offset, position)
 
     pcall(function()
@@ -868,10 +1078,14 @@ function BuildAnimator.animateBatchInTime(
 
     local stagger = BuildAnimator.getStagger(bpm)
     local count = #parts
-    centerPosition = centerPosition or parts[1].Position
+
+    local _, _, boundsCenter, boundsSize = calculateBounds(parts)
+    centerPosition = centerPosition or boundsCenter
+
+    parts = sortPartsSpatially(parts, centerPosition)
 
     if player and RunService:IsClient() then
-        BuildAnimator._focusCamera(centerPosition, player)
+        BuildAnimator._focusCamera(centerPosition, player, boundsSize)
     end
 
     for i, part in ipairs(parts) do
