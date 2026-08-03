@@ -28,7 +28,7 @@ local function filterText(text: string, playerId: number): string
         return "[filtered]"
     end
     local ok2, filtered = pcall(function()
-        return filterResult:GetNonChatStringForUserAsync(playerId)
+        return filterResult:GetNonChatStringForUserAsync()
     end)
     if not ok2 or not filtered then
         warn("[Lucineer] filterText: GetNonChatStringForUserAsync failed, returning safe default")
