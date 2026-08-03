@@ -9,6 +9,33 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
+
+--[[
+    filterText: Wraps TextService:FilterStringAsync for Roblox policy compliance.
+    Fail-closed: on any error, returns a safe placeholder.
+    Every AI-generated string must pass through this before reaching a client.
+]]
+local function filterText(text: string, playerId: number): string
+    if not text or text == "" then
+        return text
+    end
+    local ok, filterResult = pcall(function()
+        return TextService:FilterStringAsync(text, playerId)
+    end)
+    if not ok or not filterResult then
+        warn("[Lucineer] filterText: FilterStringAsync failed, returning safe default")
+        return "[filtered]"
+    end
+    local ok2, filtered = pcall(function()
+        return filterResult:GetNonChatStringForUserAsync(playerId)
+    end)
+    if not ok2 or not filtered then
+        warn("[Lucineer] filterText: GetNonChatStringForUserAsync failed, returning safe default")
+        return "[filtered]"
+    end
+    return filtered
+end
 
 -- Load modules
 local Lucineer = game:GetService("ReplicatedStorage"):WaitForChild("Lucineer")
@@ -64,7 +91,7 @@ local function handleResponse(player: Player, response: table)
 
         ResponseRemote:FireClient(player, {
             type = "error",
-            message = response.message or "Unknown error",
+            message = filterText(response.message or "Unknown error", player.UserId),
         })
         ThinkingRemote:FireClient(player, { thinking = false })
         return
@@ -113,7 +140,7 @@ local function handleResponse(player: Player, response: table)
             if result.success and result.result and result.result.type == "sendMessage" then
                 ResponseRemote:FireClient(player, {
                     type = "message",
-                    message = result.result.message,
+                    message = filterText(result.result.message, player.UserId),
                 })
             end
         end
@@ -131,7 +158,7 @@ local function handleResponse(player: Player, response: table)
 
         ResponseRemote:FireClient(player, {
             type = "message",
-            message = replyText,
+            message = filterText(replyText, player.UserId),
         })
     end
 
