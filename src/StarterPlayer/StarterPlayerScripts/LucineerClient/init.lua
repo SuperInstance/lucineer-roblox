@@ -88,6 +88,14 @@ ResponseRemote.OnClientEvent:Connect(function(data: { [string]: any })
 
         print(string.format("[Lucineer] Client: command results — %d ok, %d failed", succeeded, failed))
 
+    elseif data.type == "stats" then
+        -- Update HUD with player stats
+        if data.stats then
+            UIManager.updateStats(data.stats)
+            print(string.format("[Lucineer] Client: stats updated — bond %s, era %s",
+                tostring(data.stats.bondTier), tostring(data.stats.eraName)))
+        end
+
     elseif data.type == "error" then
         UIManager.displayChatResponse(data.message or "Something went wrong.")
         print(string.format("[Lucineer] Client: error — %s", data.message or "unknown"))

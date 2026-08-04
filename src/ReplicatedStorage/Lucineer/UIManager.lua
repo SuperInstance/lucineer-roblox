@@ -560,6 +560,76 @@ end
     Initialize the UI Manager. Creates all GUI elements and loads VoiceLines.
     Call once from the client script.
 ]]
+-- ─── Stats HUD ────────────────────────────────────────────
+-- Small panel showing bond tier, build count, and era.
+-- Updated via UIManager.updateStats()
+local function createStatsHud(gui: ScreenGui): (Frame, TextLabel)
+    local panel = Instance.new("Frame")
+    panel.Name = "StatsHud"
+    panel.Size = UDim2.new(0, 220, 0, 70)
+    panel.Position = UDim2.new(0, 16, 0, 16)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 20, 24)
+    panel.BackgroundTransparency = 0.15
+    panel.BorderSizePixel = 0
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = panel
+
+    local accent = Instance.new("Frame")
+    accent.Name = "Accent"
+    accent.Size = UDim2.new(0, 3, 1, 0)
+    accent.Position = UDim2.new(0, 0, 0, 0)
+    accent.BackgroundColor3 = Color3.fromRGB(200, 170, 110)
+    accent.BorderSizePixel = 0
+    accent.Parent = panel
+
+    local accentCorner = Instance.new("UICorner")
+    accentCorner.CornerRadius = UDim.new(0, 2)
+    accentCorner.Parent = accent
+
+    local label = Instance.new("TextLabel")
+    label.Name = "StatsText"
+    label.Size = UDim2.new(1, -16, 1, -12)
+    label.Position = UDim2.new(0, 12, 0, 6)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 13
+    label.TextColor3 = Color3.fromRGB(220, 215, 200)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Top
+    label.RichText = true
+    label.Text = '<b>Foreman</b> · 0 builds · Driftwood & Salvage'
+    label.Parent = panel
+
+    panel.Parent = gui
+    return panel, label
+end
+
+UIManager._statsHud = nil :: Frame?
+UIManager._statsLabel = nil :: TextLabel?
+
+--[[
+    Update the stats HUD with current player data.
+    @param stats table — { bondTier, bondLevel, buildCount, era, eraName }
+]]
+function UIManager.updateStats(stats: { [string]: any })
+    if not UIManager._statsLabel then return end
+
+    local tierName = stats.bondTier or "Foreman"
+    local buildCount = stats.buildCount or 0
+    local eraName = stats.eraName or "Driftwood & Salvage"
+
+    UIManager._statsLabel.Text = string.format(
+        '<b>%s</b> · %d builds · %s',
+        tierName, buildCount, eraName
+    )
+end
+
+--[[
+    Initialize the UI Manager. Creates all GUI elements and loads VoiceLines.
+    Call once from the client script.
+]]
 function UIManager.init()
     if UIManager._initialized then
         warn("[Lucineer] UIManager: already initialized")
@@ -572,8 +642,9 @@ function UIManager.init()
 
     UIManager._screenGui = createScreenGui()
     UIManager._thinkingBar, UIManager._thinkingLabel = createThinkingBar(UIManager._screenGui)
+    UIManager._statsHud, UIManager._statsLabel = createStatsHud(UIManager._screenGui)
 
-    print("[Lucineer] UIManager: initialized (with VoiceLines)")
+    print("[Lucineer] UIManager: initialized (with VoiceLines + Stats HUD)")
 end
 
 return UIManager

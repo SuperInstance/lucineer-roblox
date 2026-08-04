@@ -237,6 +237,63 @@ local function handleResponse(player: Player, response: { [string]: any })
             results = results,
         })
 
+        -- ─── GAME LOOP: Progress systems after build completes ───
+        local buildType = response.buildType or "unknown"
+        local playerId = tostring(player.UserId)
+        local succeededCount = 0
+        for _, r in ipairs(results) do
+            if r.success then succeededCount += 1 end
+        end
+
+        -- Bond XP: player gains trust for every successful build
+        if succeededCount > 0 then
+            BondSystem.addBuildXP(playerId)
+            print(string.format("[Lucineer] Server: +build XP for %s (bond level %d)",
+                player.Name, BondSystem.getBondLevel(playerId)))
+        end
+
+        -- Era progression: certain builds advance the building era
+        EraSystem.onBuild(player.Name, buildType)
+        EraSystem.onBuildingEraBuild(player.Name, buildType)
+
+        local buildingEra = EraSystem.getBuildingEra(player.Name)
+        local eraChanged = EraSystem.checkBuildingEraAdvancement(player.Name)
+        if eraChanged then
+            EraSystem.advanceBuildingEra(player.Name)
+            local newEra = EraSystem.getBuildingEraInfo(EraSystem.getBuildingEra(player.Name))
+            if newEra then
+                ResponseRemote:FireClient(player, {
+                    type = "message",
+                    message = filterFor(string.format("New era: %s", newEra.name or "Unknown"), player),
+                })
+            end
+        end
+
+        -- Achievements: check build-based achievements
+        AchievementManager.checkBuild(playerId, buildType, succeededCount)
+
+        -- Save: persist world state to cloud
+        local snapshot = {
+            buildCount = CommandExecutor._partsCreated or 0,
+            bondLevel = BondSystem.getBondLevel(playerId),
+            bondTier = BondSystem.getTier(playerId),
+            era = EraSystem.getBuildingEra(player.Name),
+            timestamp = os.time(),
+        }
+        SaveSystem.syncToCloud(player, snapshot)
+
+        -- Notify client of updated stats
+        ResponseRemote:FireClient(player, {
+            type = "stats",
+            stats = {
+                bondLevel = BondSystem.getBondLevel(playerId),
+                bondTier = BondSystem.getTierName(playerId),
+                buildCount = CommandExecutor._partsCreated or 0,
+                era = EraSystem.getBuildingEra(player.Name),
+                eraName = (EraSystem.getBuildingEraInfo(EraSystem.getBuildingEra(player.Name)) or {}).name or "Unknown",
+            },
+        })
+
         -- If there's a sendMessage command (including the automatic
         -- markUnfinished message from CHARACTER_BIBLE §6), extract and display it.
         -- Commands are envelopes: { type = "sendMessage", params = { message = ... } }.
@@ -253,6 +310,11 @@ local function handleResponse(player: Player, response: { [string]: any })
         -- No commands — just a conversational response.
         -- Stop thinking cue.
         AudioManager.stopThinking()
+    end
+
+    -- Conversational XP: player gains a small amount of trust just for talking
+    if response.intent == "talk" or (not response.commands and #commands == 0) then
+        BondSystem.addConversationXP(tostring(player.UserId))
     end
 
     -- If the response has a direct message (Worker returns 'reply', not 'message')
