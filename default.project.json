@@ -6,53 +6,144 @@
       "$className": "ReplicatedStorage",
       "Lucineer": {
         "$className": "Folder",
-        "Config": { "$path": "src/ReplicatedStorage/Lucineer/Config.lua" },
-        "Http": { "$path": "src/ReplicatedStorage/Lucineer/Http.lua" },
-        "Poller": { "$path": "src/ReplicatedStorage/Lucineer/Poller.lua" },
-        "ChatHandler": { "$path": "src/ReplicatedStorage/Lucineer/ChatHandler.lua" },
-        "CommandExecutor": { "$path": "src/ReplicatedStorage/Lucineer/CommandExecutor.lua" },
-        "WorldScanner": { "$path": "src/ReplicatedStorage/Lucineer/WorldScanner.lua" },
-        "UIManager": { "$path": "src/ReplicatedStorage/Lucineer/UIManager.lua" },
-        "AudioManager": { "$path": "src/ReplicatedStorage/Lucineer/AudioManager.lua" },
-        "BuildAnimator": { "$path": "src/ReplicatedStorage/Lucineer/BuildAnimator.lua" },
-        "VibeCoder": { "$path": "src/ReplicatedStorage/Lucineer/VibeCoder.lua" },
-        "VibeCoderDialogue": { "$path": "src/ReplicatedStorage/Lucineer/VibeCoderDialogue.lua" },
-        "VoiceLines": { "$path": "src/ReplicatedStorage/Lucineer/VoiceLines.lua" },
-        "VoiceLinesData": { "$path": "src/ReplicatedStorage/Lucineer/VoiceLinesData.lua" },
-        "CinematicController": { "$path": "src/ReplicatedStorage/Lucineer/CinematicController.lua" },
-        "FilterGate": { "$path": "src/ReplicatedStorage/Lucineer/FilterGate.lua" },
-        "BeatClock": { "$path": "src/ReplicatedStorage/Lucineer/BeatClock.lua" }
+        "Config": {
+          "$path": "src/ReplicatedStorage/Lucineer/Config.lua"
+        },
+        "Http": {
+          "$path": "src/ReplicatedStorage/Lucineer/Http.lua"
+        },
+        "Poller": {
+          "$path": "src/ReplicatedStorage/Lucineer/Poller.lua"
+        },
+        "ChatHandler": {
+          "$path": "src/ReplicatedStorage/Lucineer/ChatHandler.lua"
+        },
+        "CommandExecutor": {
+          "$path": "src/ReplicatedStorage/Lucineer/CommandExecutor.lua"
+        },
+        "WorldScanner": {
+          "$path": "src/ReplicatedStorage/Lucineer/WorldScanner.lua"
+        },
+        "UIManager": {
+          "$path": "src/ReplicatedStorage/Lucineer/UIManager.lua"
+        },
+        "AudioManager": {
+          "$path": "src/ReplicatedStorage/Lucineer/AudioManager.lua"
+        },
+        "BuildAnimator": {
+          "$path": "src/ReplicatedStorage/Lucineer/BuildAnimator.lua"
+        },
+        "VibeCoder": {
+          "$path": "src/ReplicatedStorage/Lucineer/VibeCoder.lua"
+        },
+        "VibeCoderDialogue": {
+          "$path": "src/ReplicatedStorage/Lucineer/VibeCoderDialogue.lua"
+        },
+        "VoiceLines": {
+          "$path": "src/ReplicatedStorage/Lucineer/VoiceLines.lua"
+        },
+        "VoiceLinesData": {
+          "$path": "src/ReplicatedStorage/Lucineer/VoiceLinesData.lua"
+        },
+        "CinematicController": {
+          "$path": "src/ReplicatedStorage/Lucineer/CinematicController.lua"
+        },
+        "FilterGate": {
+          "$path": "src/ReplicatedStorage/Lucineer/FilterGate.lua"
+        },
+        "BeatClock": {
+          "$path": "src/ReplicatedStorage/Lucineer/BeatClock.lua"
+        },
+        "InstrumentPanel": {
+          "$path": "src/ReplicatedStorage/Lucineer/InstrumentPanel.lua"
+        },
+        "SceneDirector": {
+          "$path": "src/ReplicatedStorage/Lucineer/SceneDirector.lua"
+        },
+        "VesselAudio": {
+          "$path": "src/ReplicatedStorage/Lucineer/VesselAudio.lua"
+        },
+        "EnvironmentAudio": {
+          "$path": "src/ReplicatedStorage/Lucineer/EnvironmentAudio.lua"
+        },
+        "WildlifeAudio": {
+          "$path": "src/ReplicatedStorage/Lucineer/WildlifeAudio.lua"
+        },
+        "UIAudio": {
+          "$path": "src/ReplicatedStorage/Lucineer/UIAudio.lua"
+        },
+        "MusicDirector": {
+          "$path": "src/ReplicatedStorage/Lucineer/MusicDirector.lua"
+        }
       }
     },
     "ServerScriptService": {
       "$className": "ServerScriptService",
-      "LucineerServer": { "$path": "src/ServerScriptService/LucineerServer/init.lua" },
-      "ServerConfig": { "$path": "src/ServerScriptService/LucineerServer/ServerConfig.lua" },
-      "NPCManager": { "$path": "src/ServerScriptService/NPCManager/init.lua" },
-      "AchievementManager": { "$path": "src/ServerScriptService/AchievementManager/init.lua" },
-      "BondSystem": { "$path": "src/ServerScriptService/BondSystem/init.lua" },
-      "EraSystem": { "$path": "src/ServerScriptService/EraSystem/init.lua" },
-      "CraftingSystem": { "$path": "src/ServerScriptService/EraSystem/CraftingSystem.lua" },
-      "Recipes": { "$path": "src/ServerScriptService/EraSystem/Recipes.lua" },
-      "SaveSystem": { "$path": "src/ServerScriptService/SaveSystem/init.lua" },
-      "TutorialSystem": { "$path": "src/ServerScriptService/TutorialSystem/init.lua" },
-      "WeatherSystem": { "$path": "src/ServerScriptService/WeatherSystem/init.lua" },
-      "WeatherEffects": { "$path": "src/ServerScriptService/WeatherSystem/Effects.lua" },
-      "PowerGrid": { "$path": "src/ServerScriptService/PowerGrid/init.lua" },
-      "PowerMechanical": { "$path": "src/ServerScriptService/PowerGrid/Mechanical.lua" },
-      "PowerVisualization": { "$path": "src/ServerScriptService/PowerGrid/Visualization.lua" },
-      "WorldGenerator": { "$path": "src/ServerScriptService/WorldGenerator/init.lua" },
-      "WorldConfig": { "$path": "src/ServerScriptService/WorldGenerator/Config.lua" },
-      "Resources": { "$path": "src/ServerScriptService/WorldGenerator/Resources.lua" },
-      "TideSystem": { "$path": "src/ServerScriptService/WorldGenerator/TideSystem.lua" },
-      "VibeCodeExecutor": { "$path": "src/ServerScriptService/VibeCodeExecutor/init.lua" },
-      "OnboardingSystem": { "$path": "src/ServerScriptService/OnboardingSystem/init.lua" }
+      "LucineerServer": {
+        "$path": "src/ServerScriptService/LucineerServer"
+      },
+      "VesselSystem": {
+        "$path": "src/ServerScriptService/VesselSystem"
+      },
+      "FishingSystem": {
+        "$path": "src/ServerScriptService/FishingSystem"
+      },
+      "EconomySystem": {
+        "$path": "src/ServerScriptService/EconomySystem"
+      },
+      "CrewSystem": {
+        "$path": "src/ServerScriptService/CrewSystem"
+      },
+      "NPCManager": {
+        "$path": "src/ServerScriptService/NPCManager"
+      },
+      "AchievementManager": {
+        "$path": "src/ServerScriptService/AchievementManager"
+      },
+      "BondSystem": {
+        "$path": "src/ServerScriptService/BondSystem"
+      },
+      "EraSystem": {
+        "$path": "src/ServerScriptService/EraSystem"
+      },
+      "SaveSystem": {
+        "$path": "src/ServerScriptService/SaveSystem"
+      },
+      "TutorialSystem": {
+        "$path": "src/ServerScriptService/TutorialSystem"
+      },
+      "OnboardingSystem": {
+        "$path": "src/ServerScriptService/OnboardingSystem"
+      },
+      "WeatherSystem": {
+        "$path": "src/ServerScriptService/WeatherSystem"
+      },
+      "PowerGrid": {
+        "$path": "src/ServerScriptService/PowerGrid"
+      },
+      "WorldGenerator": {
+        "$path": "src/ServerScriptService/WorldGenerator"
+      },
+      "VibeCodeExecutor": {
+        "$path": "src/ServerScriptService/VibeCodeExecutor"
+      }
     },
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
-        "LucineerClient": { "$path": "src/StarterPlayer/StarterPlayerScripts/LucineerClient/init.lua" }
+        "LucineerClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/LucineerClient"
+        },
+        "VesselClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/VesselClient"
+        },
+        "VisionController": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/VisionController"
+        },
+        "EnvironmentController": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/EnvironmentController"
+        }
       }
     }
   }

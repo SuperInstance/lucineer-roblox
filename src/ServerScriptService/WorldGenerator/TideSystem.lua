@@ -41,6 +41,13 @@ TideSystem._stormActive = false
 TideSystem._nextStormRoll = true -- whether to roll for storm next high tide
 TideSystem._connection = nil     -- RunService connection
 
+-- Wave / current state (used by vessel physics)
+TideSystem._waveHeight = 1.0     -- significant wave height (studs)
+TideSystem._waveDirection = 0    -- wave heading (radians, 0 = +X)
+TideSystem._currentStrength = 0  -- tidal current strength (studs/sec)
+TideSystem._currentDirection = 0 -- tidal current heading (radians)
+TideSystem._weatherSeverity = 0  -- 0..1 weather influence on waves
+
 -- Callbacks
 TideSystem._onPhaseChange = nil  -- function(phaseName, waterLevel)
 TideSystem._onStorm = nil        -- function(stormData)
@@ -186,6 +193,9 @@ local function update(dt)
         end
     end
 
+    -- Update wave and current state based on phase and weather
+    TideSystem._updateWavesAndCurrents(phaseName, dt)
+
     -- Phase change detection
     if phaseName ~= TideSystem._currentPhase then
         local oldPhase = TideSystem._currentPhase
@@ -279,6 +289,91 @@ TideSystem._updateAudio = function(phaseName)
 end
 
 --==========================================================================
+-- WAVE & CURRENT COMPUTATION (internal)
+--==========================================================================
+
+--[[
+    Update wave height, wave direction, and tidal currents.
+    These values feed into vessel physics so boats drift, pitch, and roll
+    realistically with the tide and weather.
+
+    Wave height is influenced by:
+      • Tide phase (higher at high tide, lower at low tide)
+      • Storm state (significantly larger during storms)
+      • Weather severity (0..1, set externally by WeatherSystem)
+
+    Current direction reverses with tide:
+      • Rising tide  → current flows INWARD (toward shore)
+      • Falling tide → current flows OUTWARD (away from shore)
+      • Slack water (low/high) → minimal current
+]]
+TideSystem._updateWavesAndCurrents = function(phaseName, dt)
+    -- Base wave height by phase
+    local baseWave = 1.0
+    if phaseName == "high" then
+        baseWave = 2.0
+    elseif phaseName == "rising" then
+        baseWave = 1.5
+    elseif phaseName == "falling" then
+        baseWave = 1.5
+    elseif phaseName == "low" then
+        baseWave = 0.8
+    end
+
+    -- Storm multiplier
+    local stormMult = 1.0
+    if TideSystem._stormActive then
+        stormMult = 3.5
+    end
+
+    -- Weather severity influence (0..1)
+    local weatherMult = 1.0 + (TideSystem._weatherSeverity * 1.5)
+
+    -- Target wave height
+    local targetWaveHeight = baseWave * stormMult * weatherMult
+
+    -- Smoothly interpolate wave height (avoid sudden jumps)
+    local lerpFactor = math.clamp(dt * 0.5, 0, 1)
+    TideSystem._waveHeight = TideSystem._waveHeight + (targetWaveHeight - TideSystem._waveHeight) * lerpFactor
+
+    -- Wave direction: gradually shifts with seed-based pseudo-noise
+    -- Base direction from world seed, slowly oscillating
+    local waveNoise = math.noise(TideSystem._elapsed * 0.01, 0, TideSystem._worldSeed * 0.001)
+    TideSystem._waveDirection = waveNoise * math.pi  -- ±π range
+
+    -- Tidal current: strength peaks during rising/falling, zero at slack
+    local currentMag = 0
+    if phaseName == "rising" then
+        currentMag = 2.5  -- studs/sec inbound
+    elseif phaseName == "falling" then
+        currentMag = -2.5  -- studs/sec outbound
+    else
+        currentMag = 0.3 * (phaseName == "high" and 1 or -1)  -- minimal residual
+    end
+
+    -- Storm surge adds to current
+    if TideSystem._stormActive then
+        currentMag = currentMag + 1.5
+    end
+
+    -- Smooth current strength transition
+    local prevStrength = TideSystem._currentStrength
+    TideSystem._currentStrength = prevStrength + (currentMag - prevStrength) * lerpFactor
+
+    -- Current direction: toward shore on rising, away on falling
+    -- Shore is approximately at origin (island center)
+    -- Direction convention: 0 = +X (east), π/2 = +Z (south)
+    if TideSystem._currentStrength >= 0 then
+        -- Inbound: current flows toward island center
+        -- We use a general inward heading; actual per-position vector
+        -- is computed by the caller using GetVesselDrift()
+        TideSystem._currentDirection = math.pi  -- placeholder; real drift is radial
+    else
+        TideSystem._currentDirection = 0  -- placeholder; outbound
+    end
+end
+
+--==========================================================================
 -- PUBLIC API
 --==========================================================================
 
@@ -358,6 +453,72 @@ function TideSystem.GetCycleProgress()
     return (TideSystem._elapsed % TideSystem._cycleLength) / TideSystem._cycleLength
 end
 
+--[[
+    Get current significant wave height (studs).
+    Used by vessel physics for pitch/roll/heave calculations.
+    @return number  Wave height in studs (typically 0.5–7.0)
+]]
+function TideSystem.GetWaveHeight()
+    return TideSystem._waveHeight
+end
+
+--[[
+    Get current wave direction (radians).
+    Represents the heading from which waves are coming.
+    @return number  Direction in radians (0 = +X axis)
+]]
+function TideSystem.GetWaveDirection()
+    return TideSystem._waveDirection
+end
+
+--[[
+    Get current tidal current vector.
+    Positive strength = inbound (toward shore).
+    Negative strength = outbound (away from shore).
+    @return number strength  Current speed in studs/sec
+    @return number direction  Current heading in radians
+]]
+function TideSystem.GetCurrent()
+    return TideSystem._currentStrength, TideSystem._currentDirection
+end
+
+--[[
+    Get the drift vector for a vessel at a given position.
+    Computes the actual current direction based on position relative to island center.
+    @param position Vector3  Vessel world position
+    @return Vector3  Drift velocity vector (studs/sec)
+]]
+function TideSystem.GetVesselDrift(position)
+    local strength = TideSystem._currentStrength
+    if math.abs(strength) < 0.1 then
+        return Vector3.new(0, 0, 0)
+    end
+
+    -- Compute radial direction: inbound = toward origin, outbound = away from origin
+    local horizontal = Vector3.new(position.X, 0, position.Z)
+    local distFromCenter = horizontal.Magnitude
+    if distFromCenter < 1 then
+        return Vector3.new(0, 0, 0)
+    end
+
+    local radialDir = horizontal.Unit
+    if strength > 0 then
+        -- Inbound: toward center
+        return -radialDir * strength
+    else
+        -- Outbound: away from center
+        return radialDir * (-strength)
+    end
+end
+
+--[[
+    Set weather severity influence (called by WeatherSystem).
+    @param severity number  0..1 (0 = calm, 1 = severe)
+]]
+function TideSystem.SetWeatherSeverity(severity)
+    TideSystem._weatherSeverity = math.clamp(severity or 0, 0, 1)
+end
+
 --- Set callback for phase changes.
 --- @param callback function(phaseName, waterLevel)
 function TideSystem.SetOnPhaseChange(callback)
@@ -385,6 +546,11 @@ function TideSystem.Serialize()
         currentPhase = TideSystem._currentPhase,
         stormActive = TideSystem._stormActive,
         cycleLength = TideSystem._cycleLength,
+        waveHeight = TideSystem._waveHeight,
+        waveDirection = TideSystem._waveDirection,
+        currentStrength = TideSystem._currentStrength,
+        currentDirection = TideSystem._currentDirection,
+        weatherSeverity = TideSystem._weatherSeverity,
     }
 end
 
@@ -397,6 +563,11 @@ function TideSystem.Deserialize(data)
     TideSystem._currentPhase = data.currentPhase or "low"
     TideSystem._stormActive = data.stormActive or false
     TideSystem._cycleLength = data.cycleLength or TideSystem._cycleLength
+    TideSystem._waveHeight = data.waveHeight or 1.0
+    TideSystem._waveDirection = data.waveDirection or 0
+    TideSystem._currentStrength = data.currentStrength or 0
+    TideSystem._currentDirection = data.currentDirection or 0
+    TideSystem._weatherSeverity = data.weatherSeverity or 0
 end
 
 return TideSystem

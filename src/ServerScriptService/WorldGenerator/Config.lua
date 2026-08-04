@@ -344,6 +344,41 @@ Config.biomeDensity = {
 }
 
 --==========================================================================
+-- OCEAN / WATER WORLD
+--==========================================================================
+
+Config.ocean = {
+    size = 2000,              -- ocean extends 2000 studs in each direction from island
+    depth = -200,             -- ocean floor depth
+    floorMaterial = "Mud",    -- ocean floor material
+    surfaceLevel = 0,         -- water surface Y position (matches tide system)
+
+    -- Navigation hazards
+    rocks = {
+        count = 40,           -- submerged/partially submerged rocks
+        minSize = 3,
+        maxSize = 15,
+        minDistFromShore = 30,
+        maxDistFromShore = 500,
+    },
+
+    -- Channels and routes
+    channels = {
+        main = { width = 80, depth = -15 },  -- shipping channel to cannery dock
+        secondary = { width = 40, depth = -8 }, -- fishing grounds access
+    },
+
+    -- Fish zones (used by FishingSystem)
+    fishZones = {
+        kelpBeds = { count = 5, species = {"herring", "cod"}, depth = { min = -5, max = -15 } },
+        halibutGrounds = { count = 3, species = {"halibut"}, depth = { min = -30, max = -80 } },
+        salmonRun = { count = 2, species = {"salmon"}, depth = { min = 0, max = -10 }, seasonal = true },
+        crabGrounds = { count = 4, species = {"crab"}, depth = { min = -5, max = -20 }, nearShore = true },
+        openOcean = { species = {"cod", "salmon"}, depth = { min = -20, max = -100 } },
+    },
+}
+
+--==========================================================================
 -- TIDE SYSTEM
 --==========================================================================
 

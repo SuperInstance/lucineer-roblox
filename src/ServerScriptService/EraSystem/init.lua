@@ -49,9 +49,122 @@ local Http = require(game:GetService("ReplicatedStorage"):WaitForChild("Lucineer
 local Recipes = require(script:WaitForChild("Recipes"))
 
 local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local ServerStorage = game:GetService("ServerStorage")
 
--- Memory worker URL for era persistence
-local MEMORY_URL = "https://lucineer-memory.casey-digennaro.workers.dev"
+-- Bug 1 fix: MEMORY_URL removed. Http.post/get already prepends the configured
+-- worker URL. Passing a full URL caused double-URL construction (404s).
+-- The relay worker (https://lucineer-relay.casey-digennaro.workers.dev) is
+-- configured at init time via Http.configure() in LucineerServer/init.lua.
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ERA ADVANCEMENT CONFIGURATION
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Tech era advancement thresholds: era → { minBuilds, minBondLevel }
+-- Players advance when they have enough builds in the current era AND
+-- sufficient bond level with Lucineer.
+local TECH_ERA_REQUIREMENTS = {
+    [0] = { minBuilds = 3,  minBondLevel = 1 },   -- Simple Machines → Power Transmission
+    [1] = { minBuilds = 5,  minBondLevel = 2 },   -- Power → Electricity
+    [2] = { minBuilds = 7,  minBondLevel = 3 },   -- Electricity → Control Systems
+    [3] = { minBuilds = 10, minBondLevel = 4 },   -- Control → Programmable
+    [4] = { minBuilds = 12, minBondLevel = 5 },   -- Programmable → Networked
+    [5] = { minBuilds = 15, minBondLevel = 6 },   -- Networked → Autonomous
+    -- Era 6 is the final era — no advancement
+}
+
+-- Material tiers unlocked per tech era. Each era unlocks a new tier
+-- of building materials for the player to use.
+local MATERIAL_TIERS = {
+    [0] = {
+        "wood", "stone", "rope", "fiber", "leather", "cloth",
+        "metal_fragment", "glass", "water", "sand", "clay_raw",
+    },
+    [1] = {
+        "iron_bar", "copper_ore", "tin", "bronze", "tar",
+        "ceramic", "pitch", "wax", "paper", "spring",
+    },
+    [2] = {
+        "copper_wire", "magnet", "zinc", "acid", "carbon",
+        "semiconductor", "crystal", "electrum",
+    },
+    [3] = {
+        "circuit_board", "photoresistor", "infrared_sensor", "piezo",
+        "diaphragm", "optocoupler", "electret", "lens",
+    },
+    [4] = {
+        "plastic", "potentiometer", "speaker", "camera", "boiler",
+    },
+    [5] = {
+        "fiber_optic", "lens_fresnel", "filament", "bulb_glass",
+        "insulator_porc", "antenna_wire",
+    },
+    [6] = {
+        "circuit_board", "semiconductor", "fiber_optic",
+        "ai_core_crystal", "quantum_dust",
+    },
+}
+
+-- Lighting and atmosphere presets per tech era for visual progression
+local VISUAL_PRESETS = {
+    [0] = {
+        brightness = 1.0,
+        ambient = Color3.fromRGB(120, 130, 140),
+        outdoorAmbient = Color3.fromRGB(110, 120, 130),
+        fogEnd = 500,
+        timeOfDay = 8,
+        colorCorrection = { brightness = -0.02, contrast = 0.05, saturation = -0.1, tint = Color3.fromRGB(245, 230, 210) },
+    },
+    [1] = {
+        brightness = 1.05,
+        ambient = Color3.fromRGB(130, 135, 145),
+        outdoorAmbient = Color3.fromRGB(125, 130, 140),
+        fogEnd = 600,
+        timeOfDay = 9,
+        colorCorrection = { brightness = 0, contrast = 0.08, saturation = -0.05, tint = Color3.fromRGB(240, 235, 220) },
+    },
+    [2] = {
+        brightness = 1.1,
+        ambient = Color3.fromRGB(140, 145, 160),
+        outdoorAmbient = Color3.fromRGB(135, 140, 155),
+        fogEnd = 700,
+        timeOfDay = 10,
+        colorCorrection = { brightness = 0.02, contrast = 0.1, saturation = 0, tint = Color3.fromRGB(230, 235, 245) },
+    },
+    [3] = {
+        brightness = 1.15,
+        ambient = Color3.fromRGB(150, 150, 170),
+        outdoorAmbient = Color3.fromRGB(145, 145, 165),
+        fogEnd = 800,
+        timeOfDay = 11,
+        colorCorrection = { brightness = 0.04, contrast = 0.15, saturation = 0.05, tint = Color3.fromRGB(220, 230, 250) },
+    },
+    [4] = {
+        brightness = 1.2,
+        ambient = Color3.fromRGB(160, 155, 180),
+        outdoorAmbient = Color3.fromRGB(155, 150, 175),
+        fogEnd = 900,
+        timeOfDay = 12,
+        colorCorrection = { brightness = 0.06, contrast = 0.2, saturation = 0.1, tint = Color3.fromRGB(210, 225, 255) },
+    },
+    [5] = {
+        brightness = 1.25,
+        ambient = Color3.fromRGB(170, 165, 190),
+        outdoorAmbient = Color3.fromRGB(165, 160, 185),
+        fogEnd = 1000,
+        timeOfDay = 13,
+        colorCorrection = { brightness = 0.08, contrast = 0.25, saturation = 0.15, tint = Color3.fromRGB(200, 220, 255) },
+    },
+    [6] = {
+        brightness = 1.3,
+        ambient = Color3.fromRGB(180, 175, 200),
+        outdoorAmbient = Color3.fromRGB(175, 170, 195),
+        fogEnd = 1200,
+        timeOfDay = 14,
+        colorCorrection = { brightness = 0.1, contrast = 0.3, saturation = 0.2, tint = Color3.fromRGB(195, 215, 255) },
+    },
+}
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ERA DEFINITIONS
@@ -492,7 +605,9 @@ end
 -- Load player era state from D1 (falls back to default era 0)
 local function loadPlayer(playerName)
     local success, result = pcall(function()
-        return Http.post(MEMORY_URL .. "/api/era/load", {
+        -- Bug 1 fix: path only — Http.post prepends worker URL automatically.
+        -- Bug 2 fix: auth header injected by Http module on every call.
+        return Http.post("/api/era/load", {
             playerName = playerName,
         })
     end)
@@ -559,7 +674,8 @@ local function savePlayer(playerName)
     table.sort(buildingEraUnlockedList)
 
     pcall(function()
-        Http.post(MEMORY_URL .. "/api/era/save", {
+        -- Bug 1 fix: path only — no MEMORY_URL prefix.
+        Http.post("/api/era/save", {
             playerName = playerName,
             currentEra = state.currentEra,
             unlockedEras = unlockedList,
@@ -650,6 +766,16 @@ function EraSystem.unlockEra(playerName, eraNumber)
     local era = ERAS[eraNumber]
     print(string.format("[EraSystem] %s unlocked Era %d: %s — %s",
         playerName, eraNumber, era.name, era.tagline))
+
+    -- ═══ Era Transition Handler ═══
+    -- Announce era change to all players (server-wide event)
+    EraSystem.announceEraTransition(playerName, eraNumber)
+
+    -- Unlock new material tier for this era
+    EraSystem.unlockMaterialTier(playerName, eraNumber)
+
+    -- Apply visual era indicators (lighting, atmosphere)
+    EraSystem.applyVisualEraIndicator(playerName, eraNumber)
 
     -- Fire events for other systems
     _G.EraSystem_UnlockFired = _G.EraSystem_UnlockFired or {}
@@ -762,7 +888,7 @@ function EraSystem.onBuild(playerName, buildType)
     local era = state.currentEra
     state.eraXP[tostring(era)] = (state.eraXP[tostring(era)] or 0) + 1
 
-    -- Check if this build triggers an era unlock
+    -- Check trigger-based era unlock (existing logic)
     local nextEra = state.currentEra + 1
     local nextEraDef = ERAS[nextEra]
     if nextEraDef and nextEraDef.unlockRequirements and nextEraDef.unlockRequirements.triggers then
@@ -772,6 +898,14 @@ function EraSystem.onBuild(playerName, buildType)
                 break
             end
         end
+    end
+
+    -- Also check build count + bond level era advancement (new logic)
+    -- This provides an alternative progression path: if the player has
+    -- accumulated enough builds in the current era AND has sufficient
+    -- bond level with Lucineer, advance automatically.
+    if not state.unlockedEras[nextEra] and nextEraDef and TECH_ERA_REQUIREMENTS[state.currentEra] then
+        EraSystem.checkTechEraAdvancement(playerName)
     end
 
     -- Persist
@@ -1130,6 +1264,331 @@ function EraSystem.isValidBuildingEraBuild(playerName, buildType)
         if validType == buildType then return true end
     end
     return false
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ERA PROGRESSION IMPLEMENTATION
+-- ═══════════════════════════════════════════════════════════════════════════
+
+--[[
+    Check if a player qualifies for tech era advancement based on
+    build count in the current era + bond level with Lucineer.
+    This is the ALTERNATIVE path to the trigger-based unlock.
+    Both paths can fire; whichever fires first advances the era.
+
+    @param playerName string
+    @return boolean — true if advancement check passed and era was unlocked
+]]
+function EraSystem.checkTechEraAdvancement(playerName)
+    local state = playerStates[playerName]
+    if not state then return false end
+
+    local currentEra = state.currentEra
+    local nextEra = currentEra + 1
+
+    -- Final era — no further advancement
+    if not ERAS[nextEra] then return false end
+    -- Already unlocked?
+    if state.unlockedEras[nextEra] then return false end
+
+    local req = TECH_ERA_REQUIREMENTS[currentEra]
+    if not req then return false end
+
+    -- Count builds in the current era
+    local eraXP = state.eraXP[tostring(currentEra)] or 0
+    if eraXP < req.minBuilds then
+        return false  -- Not enough builds in this era
+    end
+
+    -- Check bond level (query BondSystem if available)
+    local bondLevel = 0
+    local BondSystem = script.Parent and script.Parent:FindFirstChild("BondSystem")
+    if BondSystem then
+        local ok, bs = pcall(require, BondSystem)
+        if ok and bs.getBondLevel then
+            bondLevel = bs.getBondLevel(playerName) or 0
+        end
+    end
+
+    if bondLevel < req.minBondLevel then
+        return false  -- Bond level too low
+    end
+
+    -- All requirements met — advance!
+    print(string.format("[EraSystem] %s qualifies for Era %d via build count (%d≥%d) + bond (%d≥%d)",
+        playerName, nextEra, eraXP, req.minBuilds, bondLevel, req.minBondLevel))
+
+    return EraSystem.unlockEra(playerName, nextEra)
+end
+
+--[[
+    Announce an era transition to all players via the chat/stigmare system.
+    Fires a global event and sends a message to the player who advanced.
+
+    @param playerName string
+    @param eraNumber number
+]]
+function EraSystem.announceEraTransition(playerName, eraNumber)
+    local era = ERAS[eraNumber]
+    if not era then return end
+
+    local player = Players:FindFirstChild(playerName)
+
+    -- Server-wide announcement via global event queue
+    _G.EraSystem_Announcements = _G.EraSystem_Announcements or {}
+    table.insert(_G.EraSystem_Announcements, {
+        playerName = playerName,
+        era = eraNumber,
+        eraName = era.name,
+        tagline = era.tagline,
+        description = era.description,
+        timestamp = os.time(),
+    })
+
+    -- Fire a ReplicatedStorage event for client-side UI (era banner, toast)
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Lucineer = ReplicatedStorage:FindFirstChild("Lucineer")
+    if Lucineer then
+        local announceRemote = Lucineer:FindFirstChild("EraAnnouncementEvent")
+        if not announceRemote then
+            announceRemote = Instance.new("RemoteEvent")
+            announceRemote.Name = "EraAnnouncementEvent"
+            announceRemote.Parent = Lucineer
+        end
+
+        -- Broadcast to all players (everyone sees the era banner)
+        announceRemote:FireAllClients({
+            playerName = playerName,
+            era = eraNumber,
+            eraName = era.name,
+            tagline = era.tagline,
+            description = era.description,
+            agentSpecialization = era.agentSpecialization,
+        })
+    end
+
+    print(string.format("[EraSystem] 🌅 Era Transition: %s entered Era %d — %s (\"%s\")",
+        playerName, eraNumber, era.name, era.tagline))
+end
+
+--[[
+    Unlock a material tier for a player based on their tech era.
+    Merges the era's material list into the player's unlocked materials set.
+
+    @param playerName string
+    @param eraNumber number
+]]
+function EraSystem.unlockMaterialTier(playerName, eraNumber)
+    local state = playerStates[playerName]
+    if not state then return end
+
+    local materials = MATERIAL_TIERS[eraNumber]
+    if not materials then return end
+
+    -- Initialize unlocked materials set if missing
+    if not state.unlockedMaterials then
+        state.unlockedMaterials = {}
+    end
+
+    local newlyUnlocked = {}
+    for _, material in ipairs(materials) do
+        if not state.unlockedMaterials[material] then
+            state.unlockedMaterials[material] = true
+            table.insert(newlyUnlocked, material)
+        end
+    end
+
+    if #newlyUnlocked > 0 then
+        print(string.format("[EraSystem] %s unlocked %d new materials for Era %d: %s",
+            playerName, #newlyUnlocked, eraNumber, table.concat(newlyUnlocked, ", ")))
+
+        -- Notify client of new materials
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Lucineer = ReplicatedStorage:FindFirstChild("Lucineer")
+        if Lucineer then
+            local materialRemote = Lucineer:FindFirstChild("MaterialUnlockEvent")
+            if not materialRemote then
+                materialRemote = Instance.new("RemoteEvent")
+                materialRemote.Name = "MaterialUnlockEvent"
+                materialRemote.Parent = Lucineer
+            end
+
+            local player = Players:FindFirstChild(playerName)
+            if player then
+                materialRemote:FireClient(player, {
+                    era = eraNumber,
+                    materials = newlyUnlocked,
+                })
+            end
+        end
+    end
+end
+
+--[[
+    Apply visual era indicators: lighting, atmosphere, color grading.
+    Transitions the world's lighting to match the player's new era.
+    In multiplayer, this is per-client (affects only the advancing player).
+
+    @param playerName string
+    @param eraNumber number
+]]
+function EraSystem.applyVisualEraIndicator(playerName, eraNumber)
+    local preset = VISUAL_PRESETS[eraNumber]
+    if not preset then return end
+
+    local player = Players:FindFirstChild(playerName)
+    if not player then return end
+
+    -- Apply lighting changes on the server (global for now; per-client
+    -- replication can be added via a LightingDelta RemoteEvent later)
+    -- We use pcall extensively because Lighting properties can fail
+    -- in certain Roblox Studio states.
+
+    -- Brightness
+    pcall(function()
+        Lighting.Brightness = preset.brightness
+    end)
+
+    -- Ambient
+    pcall(function()
+        Lighting.Ambient = preset.ambient
+    end)
+
+    -- OutdoorAmbient
+    pcall(function()
+        Lighting.OutdoorAmbient = preset.outdoorAmbient
+    end)
+
+    -- Fog end distance
+    pcall(function()
+        if Lighting:FindFirstChildOfClass("Atmosphere") then
+            Lighting:FindFirstChildOfClass("Atmosphere").Decay = math.max(0.001, 1.0 / preset.fogEnd)
+        else
+            Lighting.FogEnd = preset.fogEnd
+        end
+    end)
+
+    -- Time of day (only if ClockTime is available)
+    pcall(function()
+        Lighting.ClockTime = preset.timeOfDay
+    end)
+
+    -- Color correction (brightness/contrast/saturation/tint)
+    pcall(function()
+        local cc = Lighting:FindFirstChild("EraColorCorrection")
+        if not cc then
+            cc = Instance.new("ColorCorrectionEffect")
+            cc.Name = "EraColorCorrection"
+            cc.Parent = Lighting
+        end
+
+        local c = preset.colorCorrection
+        if c then
+            -- Tween for smooth transition
+            local TweenService = game:GetService("TweenService")
+            local tweenInfo = TweenInfo.new(3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            local tween = TweenService:Create(cc, tweenInfo, {
+                Brightness = c.brightness or 0,
+                Contrast = c.contrast or 0,
+                Saturation = c.saturation or 0,
+                TintColor = c.tint or Color3.fromRGB(255, 255, 255),
+            })
+            tween:Play()
+        end
+    end)
+
+    -- Notify client to apply per-player visual overrides
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Lucineer = ReplicatedStorage:FindFirstChild("Lucineer")
+    if Lucineer then
+        local visualRemote = Lucineer:FindFirstChild("EraVisualEvent")
+        if not visualRemote then
+            visualRemote = Instance.new("RemoteEvent")
+            visualRemote.Name = "EraVisualEvent"
+            visualRemote.Parent = Lucineer
+        end
+
+        visualRemote:FireClient(player, {
+            era = eraNumber,
+            preset = preset,
+        })
+    end
+
+    -- Update ambient sound if the era defines one
+    local eraDef = ERAS[eraNumber]
+    if eraDef and eraDef.worldChanges and eraDef.worldChanges.ambientSound then
+        _G.EraSystem_AmbientUpdate = _G.EraSystem_AmbientUpdate or {}
+        _G.EraSystem_AmbientUpdate[playerName] = {
+            sound = eraDef.worldChanges.ambientSound,
+            era = eraNumber,
+        }
+    end
+
+    print(string.format("[EraSystem] Visual era indicator applied for %s (Era %d)",
+        playerName, eraNumber))
+end
+
+-- Get all unlocked materials for a player
+function EraSystem.getUnlockedMaterials(playerName)
+    local state = playerStates[playerName]
+    if not state then
+        -- Era 0 materials are always available
+        return MATERIAL_TIERS[0] or {}
+    end
+
+    if not state.unlockedMaterials then
+        -- Initialize with era 0 materials
+        state.unlockedMaterials = {}
+        for _, mat in ipairs(MATERIAL_TIERS[0] or {}) do
+            state.unlockedMaterials[mat] = true
+        end
+    end
+
+    local result = {}
+    for material, unlocked in pairs(state.unlockedMaterials) do
+        if unlocked then
+            table.insert(result, material)
+        end
+    end
+    table.sort(result)
+    return result
+end
+
+-- Check if a specific material is unlocked for a player
+function EraSystem.isMaterialUnlocked(playerName, material)
+    local state = playerStates[playerName]
+    if not state then
+        -- Check era 0 defaults
+        for _, m in ipairs(MATERIAL_TIERS[0] or {}) do
+            if m == material then return true end
+        end
+        return false
+    end
+
+    if not state.unlockedMaterials then
+        -- Initialize with era 0 materials
+        state.unlockedMaterials = {}
+        for _, mat in ipairs(MATERIAL_TIERS[0] or {}) do
+            state.unlockedMaterials[mat] = true
+        end
+    end
+
+    return state.unlockedMaterials[material] == true
+end
+
+-- Get the visual preset for a specific era (for UI previews)
+function EraSystem.getVisualPreset(eraNumber)
+    return VISUAL_PRESETS[eraNumber]
+end
+
+-- Get the tech era requirements for advancement display
+function EraSystem.getTechEraRequirements(eraNumber)
+    return TECH_ERA_REQUIREMENTS[eraNumber]
+end
+
+-- Get the material tier list for a specific era
+function EraSystem.getMaterialTier(eraNumber)
+    return MATERIAL_TIERS[eraNumber] or {}
 end
 
 print("[EraSystem] Module loaded — " .. #Recipes.getAll() .. " recipes across 7 tech eras, 5 building eras")

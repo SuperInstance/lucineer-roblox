@@ -1,12 +1,28 @@
 --!strict
 --[[
-    OnboardingSystem — Slackwater's 30-Minute Guided First Session
+    OnboardingSystem — Slackwater's Onboarding + NPC Dialogue Router
     ===============================================================
     "The tutorial IS the game. Nothing in the tutorial is a simplified
      version of 'real' gameplay. The beam carry, the first build, the
      tideline scavenging, the craft, the power connection — these are
      the actual game loop, experienced for the first time with slightly
      more guidance and slightly lower stakes."
+
+    ═══════════════════════════════════════════════════════════════
+    RESPONSIBILITY BOUNDARY (post-split-brain fix):
+    ═══════════════════════════════════════════════════════════════
+    OnboardingSystem handles:
+      ✓ First-time player flow (30-minute guided session)
+      ✓ Tutorial step progression and gating
+      ✓ Contextual hints during tutorial steps
+      ✓ NPC dialogue routing (tutorial → static tables, post-tutorial → Worker API)
+      ✓ D1 persistence for tutorial state
+      ✓ Skip detection and lost-player detection
+
+    OnboardingSystem does NOT handle:
+      ✗ NPC spawning / pathfinding / visual state (that's NPCManager)
+      ✗ ProximityPrompt creation (that's NPCManager)
+      ✗ Quest data tables (external quest system)
 
     Implements the full TUTORIAL_DESIGN.md spec:
         Minute 0-5:   The Beam Carry + Forge Arrival
@@ -1318,6 +1334,22 @@ function OnboardingSystem.init()
     setupRemotes()
     OnboardingSystem._initialized = true
 
+    -- ══════════════════════════════════════════════════════════════════════
+    -- NPC INTERACTION REGISTRATION
+    -- Register as a listener on NPCManager's interaction system.
+    -- When a player triggers a ProximityPrompt on an NPC, NPCManager
+    -- fires the interaction callbacks. OnboardingSystem routes the
+    -- dialogue through the tutorial step logic and/or Worker API.
+    -- ══════════════════════════════════════════════════════════════════════
+    if NPCManager and NPCManager.onInteraction then
+        NPCManager.onInteraction(function(npcName, player)
+            OnboardingSystem.handleNPCInteraction(npcName, player)
+        end)
+        print("[OnboardingSystem] Registered as NPCManager interaction listener")
+    else
+        warn("[OnboardingSystem] NPCManager not available — NPC interactions will not route through onboarding")
+    end
+
     Players.PlayerAdded:Connect(function(player)
         -- Load tutorial state from D1
         task.spawn(function()
@@ -1708,6 +1740,150 @@ end
 --- @return number
 function OnboardingSystem.getSalvageTarget()
     return SALVAGE_TARGET
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NPC INTERACTION ROUTING
+-- Called when a player triggers a ProximityPrompt on an NPC.
+-- Routes to either tutorial-specific dialogue (during onboarding) or
+-- the Worker API for AI-generated responses (post-tutorial).
+-- This replaces the old split-brain where NPCManager had static lines
+-- AND TutorialSystem had dialogue AND they fought each other.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+--- Handle an NPC proximity interaction from NPCManager.
+--- During onboarding: routes to step-specific dialogue tables.
+--- Post-onboarding: fires the Worker API for AI-generated responses.
+--- @param npcName string — NPC name ("Earl", "Spark", "Hermes", "Bea")
+--- @param player Player
+function OnboardingSystem.handleNPCInteraction(npcName, player)
+    local playerId = player.Name
+    local state = getOrCreateState(playerId)
+
+    -- During active tutorial: route to step-specific handlers
+    if OnboardingSystem.isOnboarding(playerId) then
+        -- During tutorial, NPC interactions are contextual to the step
+        local step = state.step
+
+        if step == 3 and npcName == "Earl" then
+            -- Tideline quest step: Earl gives the assignment
+            deliverLine(playerId, TIDELINE_DIALOGUE.earl_assign)
+            return
+        end
+
+        if step == 4 and npcName == "Spark" then
+            -- Crafting step: Spark emotes encouragement
+            if NPCManager and NPCManager.emitSparks then
+                NPCManager.emitSparks("Spark")
+            end
+            return
+        end
+
+        if step == 5 and npcName == "Bea" then
+            -- Power step: Bea acknowledges the lamp
+            deliverLine(playerId, {
+                speaker = "Bea",
+                line = "Mm.",
+            })
+            return
+        end
+
+        -- For other NPC interactions during tutorial, deliver a brief
+        -- contextual hint without breaking the tutorial flow
+        if npcName == "Spark" then
+            -- Spark emotes but doesn't speak
+            if NPCManager and NPCManager.emitSparks then
+                NPCManager.emitSparks("Spark")
+            end
+            if NPCManager and NPCManager.showDialogue then
+                NPCManager.showDialogue("Spark", "*tilts head, single lens-blink*", player, 4)
+            end
+            return
+        end
+
+        -- Default: deliver a brief contextual line during tutorial
+        -- without breaking step progression
+        return
+    end
+
+    -- ════════════════════════════════════════════════════════════════════════
+    -- POST-TUTORIAL: Route to Worker API for AI-generated dialogue
+    -- This is where Lucineier's AI personality comes through. The Worker
+    -- pipeline generates contextual responses based on player history,
+    -- era, and game state. NPCManager displays them via showDialogue.
+    -- ════════════════════════════════════════════════════════════════════════
+    OnboardingSystem.requestAIDialogue(npcName, player)
+end
+
+--- Request AI-generated dialogue from the Worker API pipeline.
+--- Falls back to a brief generic acknowledgment if the Worker is unavailable.
+--- @param npcName string
+--- @param player Player
+function OnboardingSystem.requestAIDialogue(npcName, player)
+    local playerId = player.Name
+
+    -- Fire request to the Worker API via HttpService
+    -- The Worker generates a contextual response based on:
+    --   - NPC personality/lore (system prompt)
+    --   - Player conversation history (D1)
+    --   - Current game state (era, bonds, quest progress)
+    --   - Time of day, weather, recent events
+    task.spawn(function()
+        local success, result = pcall(function()
+            return HttpService:RequestAsync({
+                Url = MEMORY_URL .. "/api/dialogue/npc",
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({
+                    player_name = playerId,
+                    npc_name = npcName,
+                    context = {
+                        step = OnboardingSystem.getStep(playerId),
+                        completed = OnboardingSystem.hasCompleted(playerId),
+                    },
+                }),
+            })
+        end)
+
+        if success and result and result.Success then
+            local dataOk, data = pcall(function()
+                return HttpService:JSONDecode(result.Body)
+            end)
+            if dataOk and data and data.message then
+                -- Display the AI-generated dialogue via NPCManager
+                if NPCManager and NPCManager.showDialogue then
+                    NPCManager.showDialogue(npcName, data.message, player, data.duration or 8)
+                else
+                    -- Fallback: direct bubble (NPCManager not loaded)
+                    warn(string.format("[OnboardingSystem] NPCManager not available to show dialogue for %s", npcName))
+                end
+                return
+            end
+        end
+
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- FALLBACK: Worker API unavailable
+        -- Show a brief, non-static acknowledgment that doesn't fight
+        -- with AI responses. These are intentionally minimal — just
+        -- enough so the NPC doesn't silently ignore the player.
+        -- ═══════════════════════════════════════════════════════════════════════
+        local fallbackLine
+        if npcName == "Earl" then
+            fallbackLine = "Manifest's current. Come back if you need work."
+        elseif npcName == "Spark" then
+            fallbackLine = "*servos whirr, single blink*"
+        elseif npcName == "Hermes" then
+            fallbackLine = "Channel's running. I'll be here."
+        elseif npcName == "Bea" then
+            fallbackLine = "The Light holds."
+        else
+            fallbackLine = "..."
+        end
+
+        if NPCManager and NPCManager.showDialogue then
+            NPCManager.showDialogue(npcName, fallbackLine, player, 5)
+        end
+    end)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════

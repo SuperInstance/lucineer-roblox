@@ -33,8 +33,9 @@ local Recipes = require(script.Parent:WaitForChild("Recipes"))
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Memory worker URL for inventory persistence
-local MEMORY_URL = "https://lucineer-memory.casey-digennaro.workers.dev"
+-- Bug 1 fix: MEMORY_URL removed. Http.post/get already prepends the configured
+-- worker URL. Passing a full URL caused double-URL construction (404s).
+-- Bug 2 fix: auth header (X-Lucineer-Key) is injected by Http.headers() on every call.
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- RUNTIME STATE
@@ -131,7 +132,8 @@ end
 -- Load inventory from D1
 function CraftingSystem.loadInventory(playerName)
     local success, result = pcall(function()
-        return Http.post(MEMORY_URL .. "/api/inventory/load", {
+        -- Bug 1 fix: path only — Http.post prepends worker URL automatically.
+        return Http.post("/api/inventory/load", {
             playerName = playerName,
         })
     end)
@@ -154,7 +156,8 @@ function CraftingSystem.saveInventory(playerName)
     if not inv then return end
 
     pcall(function()
-        Http.post(MEMORY_URL .. "/api/inventory/save", {
+        -- Bug 1 fix: path only — no MEMORY_URL prefix.
+        Http.post("/api/inventory/save", {
             playerName = playerName,
             items = inv,
         })
@@ -350,7 +353,8 @@ function CraftingSystem.craft(playerName, recipeId)
 
     -- Record the craft
     pcall(function()
-        Http.post(MEMORY_URL .. "/api/crafts/record", {
+        -- Bug 1 fix: path only — no MEMORY_URL prefix.
+        Http.post("/api/crafts/record", {
             playerName = playerName,
             recipeId = recipeId,
         })

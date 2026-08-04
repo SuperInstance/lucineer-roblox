@@ -54,6 +54,10 @@ local SAVE_VERSION = 1             -- snapshot format version
 -- playerName → { loaded = true, lastBuildSave = os.time(), inventory = {}, eraData = {}, bondLevel = 0 }
 local playerSaveState = {}
 
+-- Bug 3 fix: per-player save lock to prevent concurrent save operations
+-- playerName → boolean (true while a save is in-flight)
+local saveLocks = {}
+
 -- Track loaded legacy builds for cleanup rotation
 local legacyBuilds = {}  -- array of { playerName = string, folder = Instance, timestamp = number }
 
@@ -184,7 +188,9 @@ end
     @return boolean success
 ]]
 local function saveToR2(key, data)
-    local response, err = Http.post("/api/save/r2/" .. key, {
+    -- Bug 1 fix: pass path only — Http.post already prepends the worker URL.
+    -- Bug 2 fix: auth header (X-Lucineer-Key) is injected by Http.headers() on every request.
+    local _, err = Http.post("/api/save/r2/" .. key, {
         key = key,
         data = jsonEncode(data),
     })
@@ -203,6 +209,7 @@ end
     @return table? -- decoded data, or nil if not found / error
 ]]
 local function loadFromR2(key)
+    -- Bug 1/2 fix: path-only, auth headers injected by Http module.
     local response, err = Http.get("/api/save/r2/" .. key)
 
     if err then
@@ -661,6 +668,12 @@ local function savePlayer(playerName)
         return false
     end
 
+    -- Bug 3 fix: per-player save lock — prevent concurrent saves
+    if saveLocks[playerName] then
+        return false
+    end
+    saveLocks[playerName] = true
+
     local success = true
 
     -- Save build snapshot to R2 (Bug 4 fix: pass playerName to filter)
@@ -696,6 +709,9 @@ local function savePlayer(playerName)
 
     state.lastBuildSave = os.time()
 
+    -- Bug 3 fix: release save lock
+    saveLocks[playerName] = nil
+
     if success then
         print(string.format("[SaveSystem] Full save complete for %s (%d parts)",
             playerName, buildSnapshot.metadata.partCount))
@@ -716,11 +732,16 @@ local function saveBuilds(playerName)
     -- Bug 3 fix: skip save if still loading (race condition guard)
     if state.loading then return false end
 
+    -- Bug 3 fix: skip if another save is in-flight for this player
+    if saveLocks[playerName] then return false end
+
     -- Debounce: skip if saved within last 5 seconds
     local now = os.time()
     if state.lastBuildSave and (now - state.lastBuildSave) < 5 then
         return true
     end
+
+    saveLocks[playerName] = true
 
     -- Bug 4 fix: pass playerName to serialize only this player's builds
     local snapshot = serializeBuilds(playerName)
@@ -731,9 +752,13 @@ local function saveBuilds(playerName)
             print(string.format("[SaveSystem] Build snapshot saved for %s (%d parts)",
                 playerName, snapshot.metadata.partCount))
         end
+        -- Bug 3 fix: release save lock
+        saveLocks[playerName] = nil
         return ok
     end
 
+    -- Bug 3 fix: release save lock (empty builds = nothing to save)
+    saveLocks[playerName] = nil
     return true  -- empty builds = success (nothing to save)
 end
 
@@ -864,6 +889,7 @@ function SaveSystem.init()
 
         -- Clear in-memory state
         playerSaveState[player.Name] = nil
+        saveLocks[player.Name] = nil
 
         print(string.format("[SaveSystem] Player %s removed, state cleared", player.Name))
     end)

@@ -100,6 +100,22 @@ local SaveSystem = require(script.Parent:WaitForChild("SaveSystem"))
 local TutorialSystem = require(script.Parent:WaitForChild("TutorialSystem"))
 local WeatherSystem = require(script.Parent:WaitForChild("WeatherSystem"))
 
+-- ═══ VESSEL ECOSYSTEM MODULES ═══
+-- Safe-load with pcall so missing subsystems don't crash the server
+local function safeRequire(instance)
+    if not instance then return nil end
+    local ok, mod = pcall(require, instance)
+    if ok then return mod end
+    warn(string.format("[Lucineer] Could not load %s: %s", instance.Name, tostring(mod)))
+    return nil
+end
+
+local VesselSystem     = safeRequire(script.Parent:FindFirstChild("VesselSystem"))
+local FishingSystem    = safeRequire(script.Parent:FindFirstChild("FishingSystem"))
+local EconomySystem    = safeRequire(script.Parent:FindFirstChild("EconomySystem"))
+local CrewSystem       = safeRequire(script.Parent:FindFirstChild("CrewSystem"))
+local VesselIntegration = safeRequire(script:FindFirstChild("VesselIntegration"))
+
 -- Create RemoteEvents for client ↔ server communication
 local function createRemote(name: string): RemoteEvent
     local existing = Lucineer:FindFirstChild(name)
@@ -389,8 +405,56 @@ local function init()
 
     WeatherSystem.init()
 
+    -- ═══ VESSEL ECOSYSTEM INIT ═══
+    print("[Lucineer] Server: initializing vessel ecosystem...")
+    if VesselSystem then
+        VesselSystem.init()
+        print("[Lucineer] Server: VesselSystem initialized")
+    end
+    if FishingSystem then
+        FishingSystem.init()
+        print("[Lucineer] Server: FishingSystem initialized")
+    end
+    if EconomySystem then
+        EconomySystem.init()
+        print("[Lucineer] Server: EconomySystem initialized")
+    end
+    if CrewSystem then
+        CrewSystem.init()
+        print("[Lucineer] Server: CrewSystem initialized")
+    end
+    if VesselIntegration then
+        VesselIntegration.init()
+        print("[Lucineer] Server: VesselIntegration initialized")
+    end
+
     -- Wire AI responses
     ChatHandler.onResponse(handleResponse)
+
+    -- ═══ VESSEL CHAT ROUTING ═══
+    -- Intercept chat messages for vessel commands when player is on a boat
+    if VesselIntegration then
+        local originalSubmit = ChatHandler._submitMessage
+        -- We can't easily wrap the private method, so we hook via the
+        -- Player.Chatted event which fires before ChatHandler processes
+        Players.PlayerAdded:Connect(function(player)
+            player.Chatted:Connect(function(message)
+                if VesselIntegration.handleChat(player, message) then
+                    -- Vessel command handled — suppress normal processing
+                    -- by sending a local acknowledgment
+                    print(string.format("[Lucineer] Vessel command from %s: %s", player.Name, message))
+                end
+            end)
+        end)
+        -- Wire build events to vessel integration
+        for _, player in ipairs(Players:GetPlayers()) do
+            player.Chatted:Connect(function(message)
+                if VesselIntegration.handleChat(player, message) then
+                    print(string.format("[Lucineer] Vessel command from %s: %s", player.Name, message))
+                end
+            end)
+        end
+    end
 
     -- Heartbeat: run Poller + state sync
     RunService.Heartbeat:Connect(function(dt: number)
