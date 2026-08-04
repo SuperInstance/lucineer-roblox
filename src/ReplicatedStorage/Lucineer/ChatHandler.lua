@@ -218,12 +218,59 @@ function ChatHandler.processMessage(player: Player, message: string)
         worldSnapshot = worldState,
     }
 
-    -- Fire and forget — the Poller will track the job
+    -- FAST PATH: Use /api/chat for instant AI response (200ms via Workers AI)
+    -- Falls back to /api/message job queue if /api/chat is unavailable
     task.spawn(function()
+        -- Try the fast path first
+        local chatPayload = {
+            message = filteredMessage,
+            playerName = player.Name,
+            bondLevel = 0, -- TODO: get from BondSystem
+            previousBuilds = {}, -- TODO: get from SaveSystem
+        }
+
+        local chatResponse, chatErr = Http.post("/api/chat", chatPayload)
+
+        if chatResponse and chatResponse.reply and not chatErr then
+            -- FAST PATH SUCCEEDED — get build commands
+            ChatHandler._pendingThinking[player.UserId] = nil
+
+            local commands = {}
+            if chatResponse.intent == "build" or chatResponse.buildType then
+                -- Get the actual build commands
+                local buildPayload = {
+                    message = filteredMessage,
+                    chatReply = chatResponse.reply,
+                    buildType = chatResponse.buildType or "",
+                    playerName = player.Name,
+                }
+                local buildResponse = Http.post("/api/generate-build", buildPayload)
+                if buildResponse and buildResponse.commands then
+                    commands = buildResponse.commands
+                end
+            end
+
+            -- Deliver the response with commands
+            ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
+            if ChatHandler._onResponse then
+                task.spawn(ChatHandler._onResponse, player, {
+                    reply = chatResponse.reply,
+                    commands = commands,
+                    intent = chatResponse.intent or "talk",
+                    buildType = chatResponse.buildType,
+                    status = "complete",
+                })
+            end
+            return
+        end
+
+        -- FALLBACK: Use the old job queue path
+        warn(string.format("[Lucineer] ChatHandler: /api/chat failed (%s), falling back to /api/message", chatErr or "no response"))
         local response, err = Http.post("/api/message", payload)
         if err then
-            warn(string.format("[Lucineer] ChatHandler: POST /api/message failed: %s", err))
+            warn(string.format("[Lucineer] ChatHandler: POST /api/message also failed: %s", err))
             ChatHandler._pendingThinking[player.UserId] = nil
+            ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
             AudioManager.playUi("error")
             if ChatHandler._onResponse then
                 task.spawn(ChatHandler._onResponse, player, {
@@ -238,18 +285,18 @@ function ChatHandler.processMessage(player: Player, message: string)
         if not jobId then
             -- Immediate response (no async job)
             ChatHandler._pendingThinking[player.UserId] = nil
+            ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
             if ChatHandler._onResponse then
                 task.spawn(ChatHandler._onResponse, player, response)
             end
             return
         end
 
-        -- Register with Poller
+        -- Register with Poller for the slow path
         Poller.register(
             jobId,
             function(jobResponse: { [string]: any })
                 ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
-                -- GAP #8b: Stop progressive thinking rotation
                 ChatHandler._pendingThinking[player.UserId] = nil
                 if ChatHandler._onResponse then
                     task.spawn(ChatHandler._onResponse, player, jobResponse)
@@ -257,7 +304,6 @@ function ChatHandler.processMessage(player: Player, message: string)
             end,
             function(jobErr: string)
                 ChatHandler._activeJobCount = math.max(0, ChatHandler._activeJobCount - 1)
-                -- GAP #8b: Stop progressive thinking rotation
                 ChatHandler._pendingThinking[player.UserId] = nil
                 warn(string.format("[Lucineer] ChatHandler: job %s error: %s", jobId, jobErr))
                 AudioManager.playUi("error")
