@@ -1,4 +1,3 @@
---!strict
 --[[
     EraProgression.lua — 5-Era Building Progression System
     ======================================================
@@ -43,7 +42,7 @@ EraProgression.ERAS = {
     "light",
 }
 
-local ERA_DATA: { [string]: EraDefinition } = {
+local ERA_DATA = {
     driftwood = {
         index = 1,
         name = "Driftwood",
@@ -106,36 +105,14 @@ local ERA_DATA: { [string]: EraDefinition } = {
     },
 }
 
-type EraDefinition = {
-    index: number,
-    name: string,
-    description: string,
-    requiredBuilds: number,
-    cost: { [string]: number },
-    materials: { string },
-    commands: { string },
-    areas: { string },
-    color: Color3,
-    flavor: string,
-}
-
-type SessionData = {
-    era: string,
-    totalBuilds: number,
-    buildsByType: { [string]: number },
-    unlockedAreas: { [string]: boolean },
-    eraChangedThisSession: boolean,
-    lastBuildTime: number?,
-}
-
 ----------------------------------------------------------------
 -- SESSION STORAGE
 ----------------------------------------------------------------
 
 -- player.UserId -> player session progress table
-EraProgression._sessions = {} :: { [number]: SessionData }
+EraProgression._sessions = {}
 
-local DEFAULT_SESSION: SessionData = {
+local DEFAULT_SESSION = {
     era = "driftwood",
     totalBuilds = 0,
     buildsByType = {},
@@ -151,14 +128,14 @@ local DEFAULT_SESSION: SessionData = {
 --[[
     Get a player object from a player name.
 ]]
-local function getPlayerByName(playerName: string): Player?
-    return Players:FindFirstChild(playerName) :: Player?
+local function getPlayerByName(playerName)
+    return Players:FindFirstChild(playerName)
 end
 
 --[[
     Build the default set of unlocked areas for an era.
 ]]
-local function unlockAreasForEra(session: SessionData, eraKey: string)
+local function unlockAreasForEra(session, eraKey)
     local data = ERA_DATA[eraKey]
     if not data then return end
     for _, area in ipairs(data.areas) do
@@ -187,10 +164,13 @@ end
 --[[
     Get or create a player's session data.
 ]]
-function EraProgression.getSession(playerId: number): SessionData
+function EraProgression.getSession(playerId)
     local session = EraProgression._sessions[playerId]
     if not session then
-        session = table.clone(DEFAULT_SESSION) :: SessionData
+        session = {}
+        for k, v in pairs(DEFAULT_SESSION) do
+            session[k] = v
+        end
         EraProgression._sessions[playerId] = session
     end
     return session
@@ -200,20 +180,23 @@ end
     Load saved data into session storage (called by SaveSystem on join).
     Invalid era keys fall back to driftwood.
 ]]
-function EraProgression.loadSession(playerId: number, snapshot: { [string]: any }?): boolean
+function EraProgression.loadSession(playerId, snapshot)
     if not snapshot then return false end
 
     local era = snapshot.era
-    if era and not ERA_DATA[era :: string] then
+    if era and not ERA_DATA[era] then
         warn(string.format("[EraProgression] Ignoring invalid saved era '%s' for player %d", tostring(era), playerId))
         era = nil
     end
 
-    local session = table.clone(DEFAULT_SESSION) :: SessionData
-    session.era = (era :: string) or DEFAULT_SESSION.era
+    local session = {}
+    for k, v in pairs(DEFAULT_SESSION) do
+        session[k] = v
+    end
+    session.era = era or DEFAULT_SESSION.era
     session.totalBuilds = tonumber(snapshot.totalBuilds) or 0
-    session.buildsByType = type(snapshot.buildsByType) == "table" and table.clone(snapshot.buildsByType) or {}
-    session.unlockedAreas = type(snapshot.unlockedAreas) == "table" and table.clone(snapshot.unlockedAreas) or {}
+    session.buildsByType = type(snapshot.buildsByType) == "table" and snapshot.buildsByType or {}
+    session.unlockedAreas = type(snapshot.unlockedAreas) == "table" and snapshot.unlockedAreas or {}
     session.lastBuildTime = tonumber(snapshot.lastBuildTime)
 
     -- Ensure all areas for the loaded era are unlocked.
@@ -226,14 +209,14 @@ end
 --[[
     Export session data for persistence.
 ]]
-function EraProgression.saveSession(playerId: number): { [string]: any }?
+function EraProgression.saveSession(playerId)
     local session = EraProgression._sessions[playerId]
     if not session then return nil end
     return {
         era = session.era,
         totalBuilds = session.totalBuilds,
-        buildsByType = table.clone(session.buildsByType),
-        unlockedAreas = table.clone(session.unlockedAreas),
+        buildsByType = session.buildsByType,
+        unlockedAreas = session.unlockedAreas,
         lastBuildTime = session.lastBuildTime,
     }
 end
@@ -241,7 +224,7 @@ end
 --[[
     Reset a player's progression.
 ]]
-function EraProgression.resetProgress(playerId: number)
+function EraProgression.resetProgress(playerId)
     EraProgression._sessions[playerId] = nil
     EraProgression.getSession(playerId)
     print(string.format("[EraProgression] Reset progress for player %d", playerId))
@@ -255,9 +238,9 @@ end
     Record a completed build for a player.
     Returns the player's current era key.
 ]]
-function EraProgression.recordBuild(playerId: number, buildType: string): string
+function EraProgression.recordBuild(playerId, buildType)
     local session = EraProgression.getSession(playerId)
-    session.totalBuilds += 1
+    session.totalBuilds = session.totalBuilds + 1
     session.buildsByType[buildType] = (session.buildsByType[buildType] or 0) + 1
     session.lastBuildTime = os.time()
     return session.era
@@ -266,7 +249,7 @@ end
 --[[
     Legacy alias used by the post-build pipeline in init.lua.
 ]]
-function EraProgression.onBuild(playerName: string, buildType: string)
+function EraProgression.onBuild(playerName, buildType)
     local player = getPlayerByName(playerName)
     if not player then return end
     EraProgression.recordBuild(player.UserId, buildType)
@@ -275,7 +258,7 @@ end
 --[[
     Alias kept for compatibility with the previous EraSystem API.
 ]]
-function EraProgression.onBuildingEraBuild(playerName: string, buildType: string)
+function EraProgression.onBuildingEraBuild(playerName, buildType)
     EraProgression.onBuild(playerName, buildType)
 end
 
@@ -286,7 +269,7 @@ end
 --[[
     Get a player's current era key.
 ]]
-function EraProgression.getBuildingEra(playerName: string): string
+function EraProgression.getBuildingEra(playerName)
     local player = getPlayerByName(playerName)
     if not player then return "driftwood" end
     return EraProgression.getSession(player.UserId).era
@@ -295,7 +278,7 @@ end
 --[[
     Get a player's current era as an index (1-5).
 ]]
-function EraProgression.getEraIndex(playerName: string): number
+function EraProgression.getEraIndex(playerName)
     local key = EraProgression.getBuildingEra(playerName)
     local data = ERA_DATA[key]
     return data and data.index or 1
@@ -304,26 +287,32 @@ end
 --[[
     Get full info table for an era key.
 ]]
-function EraProgression.getBuildingEraInfo(eraKey: string): { [string]: any }?
+function EraProgression.getBuildingEraInfo(eraKey)
     local data = ERA_DATA[eraKey]
     if not data then return nil end
     -- Return a shallow clone so callers cannot mutate the canonical data.
-    local copy = table.clone(data)
-    copy.color = data.color
+    local copy = {}
+    for k, v in pairs(data) do
+        copy[k] = v
+    end
     return copy
 end
 
 --[[
     Get all era definitions.
 ]]
-function EraProgression.getAllEraInfo(): { [string]: EraDefinition }
-    return table.clone(ERA_DATA)
+function EraProgression.getAllEraInfo()
+    local copy = {}
+    for k, v in pairs(ERA_DATA) do
+        copy[k] = v
+    end
+    return copy
 end
 
 --[[
     Manually set a player's era (admin / debug / cheat).
 ]]
-function EraProgression.setEra(playerName: string, eraKey: string): boolean
+function EraProgression.setEra(playerName, eraKey)
     local player = getPlayerByName(playerName)
     if not player then return false end
     local data = ERA_DATA[eraKey]
@@ -346,7 +335,7 @@ end
     Check whether a player has met the threshold to advance.
     Returns true if advancement is possible.
 ]]
-function EraProgression.checkBuildingEraAdvancement(playerName: string): boolean
+function EraProgression.checkBuildingEraAdvancement(playerName)
     local player = getPlayerByName(playerName)
     if not player then return false end
     local session = EraProgression.getSession(player.UserId)
@@ -364,7 +353,7 @@ end
     Advance a player to the next era if eligible.
     Returns the new era key, or nil if not advanced.
 ]]
-function EraProgression.advanceBuildingEra(playerName: string): string?
+function EraProgression.advanceBuildingEra(playerName)
     local player = getPlayerByName(playerName)
     if not player then return nil end
     if not EraProgression.checkBuildingEraAdvancement(playerName) then
@@ -387,7 +376,7 @@ end
 --[[
     Get progress toward the next era.
 ]]
-function EraProgression.getProgress(playerName: string): { [string]: any }?
+function EraProgression.getProgress(playerName)
     local player = getPlayerByName(playerName)
     if not player then return nil end
     local session = EraProgression.getSession(player.UserId)
@@ -415,7 +404,7 @@ end
 --[[
     Check if a material is unlocked for a player.
 ]]
-function EraProgression.isMaterialUnlocked(playerName: string, material: string): boolean
+function EraProgression.isMaterialUnlocked(playerName, material)
     local player = getPlayerByName(playerName)
     if not player then return false end
     local session = EraProgression.getSession(player.UserId)
@@ -430,7 +419,7 @@ end
 --[[
     Check if a build command is unlocked for a player.
 ]]
-function EraProgression.isCommandUnlocked(playerName: string, command: string): boolean
+function EraProgression.isCommandUnlocked(playerName, command)
     local player = getPlayerByName(playerName)
     if not player then return false end
     local session = EraProgression.getSession(player.UserId)
@@ -445,7 +434,7 @@ end
 --[[
     Check if an island area is unlocked for a player.
 ]]
-function EraProgression.isAreaUnlocked(playerName: string, area: string): boolean
+function EraProgression.isAreaUnlocked(playerName, area)
     local player = getPlayerByName(playerName)
     if not player then return false end
     local session = EraProgression.getSession(player.UserId)
@@ -455,29 +444,39 @@ end
 --[[
     Get all unlocked materials for a player.
 ]]
-function EraProgression.getUnlockedMaterials(playerName: string): { string }
+function EraProgression.getUnlockedMaterials(playerName)
     local player = getPlayerByName(playerName)
     if not player then return {} end
     local session = EraProgression.getSession(player.UserId)
     local data = ERA_DATA[session.era]
-    return data and table.clone(data.materials) or {}
+    if not data then return {} end
+    local out = {}
+    for i, v in ipairs(data.materials) do
+        out[i] = v
+    end
+    return out
 end
 
 --[[
     Get all unlocked build commands for a player.
 ]]
-function EraProgression.getUnlockedCommands(playerName: string): { string }
+function EraProgression.getUnlockedCommands(playerName)
     local player = getPlayerByName(playerName)
     if not player then return {} end
     local session = EraProgression.getSession(player.UserId)
     local data = ERA_DATA[session.era]
-    return data and table.clone(data.commands) or {}
+    if not data then return {} end
+    local out = {}
+    for i, v in ipairs(data.commands) do
+        out[i] = v
+    end
+    return out
 end
 
 --[[
     Get all unlocked island areas for a player.
 ]]
-function EraProgression.getUnlockedAreas(playerName: string): { string }
+function EraProgression.getUnlockedAreas(playerName)
     local player = getPlayerByName(playerName)
     if not player then return {} end
     local session = EraProgression.getSession(player.UserId)
@@ -492,10 +491,14 @@ end
     Get the resource cost to unlock an era from scratch.
     Useful for UI and economy integration.
 ]]
-function EraProgression.getEraCost(eraKey: string): { [string]: number }?
+function EraProgression.getEraCost(eraKey)
     local data = ERA_DATA[eraKey]
     if not data then return nil end
-    return table.clone(data.cost)
+    local copy = {}
+    for k, v in pairs(data.cost) do
+        copy[k] = v
+    end
+    return copy
 end
 
 ----------------------------------------------------------------
