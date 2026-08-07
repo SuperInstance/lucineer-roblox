@@ -1,7 +1,7 @@
 --!strict
 --[[
-    EraGates.lua — Era Progression & Build Gating System
-    =====================================================
+    EraGates.lua — Era Progression, Build Gating, Materials & Transitions
+    =====================================================================
     "You don't build a lighthouse with driftwood and good intentions.
      You earn the right to build it by learning what the sea does to
      things that aren't ready." — Lucineer
@@ -16,6 +16,13 @@
       Era 2: Pioneer    (unlock: stone buildings, bridges, windmills)
       Era 3: Mariner    (unlock: metal works, forges, advanced vessels)
       Era 4: Light      (unlock: lighthouses, temples, grand monuments)
+
+    Features:
+      • Build gating by era
+      • Visual era transitions (screen fade, banner display)
+      • Era-specific building materials (driftwood → wood → stone → metal → light)
+      • Era-locked builds (lighthouse requires Stone, cannery requires Metal)
+      • Era achievement notifications
 
     Usage:
         local EraGates = require(script.Parent.EconomySystem.EraGates)
@@ -52,18 +59,61 @@ ERA_NAMES = {
     [4] = "Light",
 }
 
+-- Era-specific building materials
+-- Each era unlocks a primary material that Lucineer uses for builds
+ERA_MATERIALS = {
+    [0] = {
+        primary = Enum.Material.Wood,
+        secondary = Enum.Material.SmoothPlastic,
+        accent = Enum.Material.LeafyGrass,
+        colorScheme = { Color3.fromRGB(139, 111, 79), Color3.fromRGB(160, 130, 95), Color3.fromRGB(120, 100, 70) },
+        description = "Driftwood — sun-bleached, salt-cured, found on the beach. It's what the sea gives you for free.",
+    },
+    [1] = {
+        primary = Enum.Material.Wood,
+        secondary = Enum.Material.SmoothPlastic,
+        accent = Enum.Material.Slate,
+        colorScheme = { Color3.fromRGB(160, 120, 80), Color3.fromRGB(140, 100, 60), Color3.fromRGB(180, 140, 90) },
+        description = "Proper lumber — cut, milled, treated. This is what you build with when you're planning to stay.",
+    },
+    [2] = {
+        primary = Enum.Material.Slate,
+        secondary = Enum.Material.Concrete,
+        accent = Enum.Material.Wood,
+        colorScheme = { Color3.fromRGB(130, 130, 135), Color3.fromRGB(100, 100, 105), Color3.fromRGB(150, 145, 140) },
+        description = "Stone — quarried, cut, fitted. Buildings made of this don't blow away. They outlast you.",
+    },
+    [3] = {
+        primary = Enum.Material.Metal,
+        secondary = Enum.Material.DiamondPlate,
+        accent = Enum.Material.Slate,
+        colorScheme = { Color3.fromRGB(140, 142, 145), Color3.fromRGB(100, 102, 105), Color3.fromRGB(170, 170, 175) },
+        description = "Steel and iron — forged, welded, riveted. This is industrial work. The sea respects metal.",
+    },
+    [4] = {
+        primary = Enum.Material.Neon,
+        secondary = Enum.Material.ForceField,
+        accent = Enum.Material.Metal,
+        colorScheme = { Color3.fromRGB(180, 200, 220), Color3.fromRGB(200, 220, 240), Color3.fromRGB(160, 190, 230) },
+        description = "Light itself — the endgame material. Buildings that glow, structures that breathe. This is what lighthouses are made of.",
+    },
+}
+
 -- Build gating: which builds require which minimum era
 -- Anything not listed here is buildable in any era
 local BUILD_ERA_REQUIREMENTS: {[string]: number} = {
-    -- Era 1+ (Salvage): proper boats, cannery, wood structures
-    ["cannery"] = 1,
+    -- Era 1+ (Salvage): proper boats, wood structures
     ["warehouse"] = 1,
     ["boathouse"] = 1,
     ["shipyard"] = 1,
     ["cottage"] = 1,
     ["workshop"] = 1,
+    ["dock extension"] = 1,
+    ["pier"] = 1,
+    ["fishing shack"] = 1,
 
-    -- Era 2+ (Pioneer): stone buildings, bridges, windmills
+    -- Era 2+ (Pioneer): stone buildings, bridges, windmills, cannery
+    ["cannery"] = 2,
     ["bridge"] = 2,
     ["windmill"] = 2,
     ["mill"] = 2,
@@ -72,6 +122,9 @@ local BUILD_ERA_REQUIREMENTS: {[string]: number} = {
     ["market"] = 2,
     ["stable"] = 2,
     ["barn"] = 2,
+    ["harbor wall"] = 2,
+    ["breakwater"] = 2,
+    ["watchtower"] = 2,
 
     -- Era 3+ (Mariner): metal works, forges, advanced vessels
     ["forge"] = 3,
@@ -79,6 +132,10 @@ local BUILD_ERA_REQUIREMENTS: {[string]: number} = {
     ["metal tower"] = 3,
     ["clock tower"] = 3,
     ["steel ship"] = 3,
+    ["engine room"] = 3,
+    ["machine shop"] = 3,
+    ["power plant"] = 3,
+    ["dry dock"] = 3,
 
     -- Era 4 (Light): lighthouses, temples, grand monuments
     ["lighthouse"] = 4,
@@ -89,6 +146,8 @@ local BUILD_ERA_REQUIREMENTS: {[string]: number} = {
     ["monument"] = 4,
     ["cathedral"] = 4,
     ["grand tower"] = 4,
+    ["signal tower"] = 4,
+    ["memorial"] = 4,
 }
 
 -- Era advancement requirements
@@ -351,10 +410,49 @@ function EraGates._notifyAdvancement(player, newEra: number, gate)
     local eraName = ERA_NAMES[newEra] or "new"
     local ceremony = gate.ceremony or ""
     local unlocks = ERA_UNLOCK_DESCRIPTIONS[newEra] or ""
+    local materials = ERA_MATERIALS[newEra]
 
-    -- Fire RemoteEvent to client
+    -- ── VISUAL ERA TRANSITION ──
+    -- Phase 1: Screen fade to black
     local target = ReplicatedStorage:FindFirstChild("Lucineer")
     local ev = target and target:FindFirstChild("EconomyEvent")
+    if ev then
+        -- Fade out
+        ev:FireClient(player, {
+            type = "eraTransition",
+            phase = "fadeOut",
+            duration = 1.5,
+        })
+    end
+
+    -- Phase 2: Banner display (after fade)
+    task.delay(1.5, function()
+        if ev then
+            ev:FireClient(player, {
+                type = "eraTransition",
+                phase = "banner",
+                newEra = newEra,
+                eraName = eraName,
+                ceremony = ceremony,
+                unlocks = unlocks,
+                materials = materials and materials.description or "",
+                duration = 4.0,
+            })
+        end
+    end)
+
+    -- Phase 3: Fade back in (after banner)
+    task.delay(5.5, function()
+        if ev then
+            ev:FireClient(player, {
+                type = "eraTransition",
+                phase = "fadeIn",
+                duration = 1.5,
+            })
+        end
+    end)
+
+    -- Fire standard advancement event
     if ev then
         ev:FireClient(player, {
             type = "eraAdvancement",
@@ -362,10 +460,11 @@ function EraGates._notifyAdvancement(player, newEra: number, gate)
             eraName = eraName,
             ceremony = ceremony,
             unlocks = unlocks,
+            materials = materials,
         })
     end
 
-    -- Also fire to all clients for server-wide awareness
+    -- Server-wide announcement
     if ev then
         ev:FireAllClients({
             type = "eraAnnouncement",
@@ -373,6 +472,25 @@ function EraGates._notifyAdvancement(player, newEra: number, gate)
             newEra = newEra,
             eraName = eraName,
         })
+    end
+
+    -- ── ERA ACHIEVEMENT NOTIFICATION ──
+    local achievements = {
+        [1] = { title = "First Real Tools", description = "Reached the Salvage era. The yard opens up." },
+        [2] = { title = "Stone and Steel", description = "Reached the Pioneer era. Build to last." },
+        [3] = { title = "The Sea Knows Your Name", description = "Reached the Mariner era. Industrial age." },
+        [4] = { title = "Things People Build to Stay", description = "Reached the Light era. The final tier." },
+    }
+    local ach = achievements[newEra]
+    if ach and ev then
+        task.delay(6.5, function()
+            ev:FireClient(player, {
+                type = "achievement",
+                title = ach.title,
+                description = ach.description,
+                era = newEra,
+            })
+        end)
     end
 
     -- Lucineer dialogue
@@ -385,11 +503,14 @@ function EraGates._notifyAdvancement(player, newEra: number, gate)
             [3] = "Mariner. The sea knows your name now. So do I, for what it's worth. Let's build something worthy of the water.",
             [4] = "Light. The last era. Lighthouses, temples — things people build when they plan to stay. This harbor is yours now.",
         }
-        responseRemote:FireClient(player, {
-            type = "dialogue",
-            text = lines[newEra] or ceremony,
-            speaker = "Lucineier",
-        })
+        -- Delay the dialogue to play during the banner phase
+        task.delay(2.0, function()
+            responseRemote:FireClient(player, {
+                type = "dialogue",
+                text = lines[newEra] or ceremony,
+                speaker = "Lucineier",
+            })
+        end)
     end
 
     print(string.format("[EraGates] %s advanced to Era %d (%s)",
@@ -479,6 +600,45 @@ function EraGates.deserialize(player, data)
     if data.stats then
         EraGates._playerStats[player.UserId] = data.stats
     end
+end
+
+----------------------------------------------------------------
+-- ERA MATERIALS API
+----------------------------------------------------------------
+
+--[[
+    Get the material set for a specific era.
+    @param era number (0-4)
+    @return table? — { primary, secondary, accent, colorScheme, description }
+]]
+function EraGates.getEraMaterials(era: number)
+    return ERA_MATERIALS[era]
+end
+
+--[[
+    Get materials available to a player based on their current era.
+    @param player Player
+    @return table? — the material set for the player's era
+]]
+function EraGates.getPlayerMaterials(player)
+    local era = EraGates.getEra(player)
+    return ERA_MATERIALS[era]
+end
+
+--[[
+    Get all builds unlocked at a specific era.
+    @param era number
+    @return table — sorted array of build type names
+]]
+function EraGates.getBuildsUnlockedAt(era: number)
+    local result = {}
+    for buildType, eraReq in pairs(BUILD_ERA_REQUIREMENTS) do
+        if eraReq == era then
+            table.insert(result, buildType)
+        end
+    end
+    table.sort(result)
+    return result
 end
 
 return EraGates
