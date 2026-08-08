@@ -94,7 +94,7 @@ local BuildAnimator = require(Lucineer:WaitForChild("BuildAnimator"))
 local NPCManager = require(script.Parent:WaitForChild("NPCManager"))
 local AchievementManager = require(script.Parent:WaitForChild("AchievementManager"))
 local BondSystem = require(script.Parent:WaitForChild("BondSystem"))
-local EraSystem = require(script.Parent:WaitForChild("EraSystem"))
+local EraProgression = require(script:WaitForChild("EraProgression"))
 local PowerGrid = require(script.Parent:WaitForChild("PowerGrid"))
 local SaveSystem = require(script.Parent:WaitForChild("SaveSystem"))
 local TutorialSystem = require(script.Parent:WaitForChild("TutorialSystem"))
@@ -269,14 +269,14 @@ local function handleResponse(player: Player, response: { [string]: any })
         end
 
         -- Era progression: certain builds advance the building era
-        EraSystem.onBuild(player.Name, buildType)
-        EraSystem.onBuildingEraBuild(player.Name, buildType)
+        EraProgression.onBuild(player.Name, buildType)
+        EraProgression.onBuildingEraBuild(player.Name, buildType)
 
-        local buildingEra = EraSystem.getBuildingEra(player.Name)
-        local eraChanged = EraSystem.checkBuildingEraAdvancement(player.Name)
+        local buildingEra = EraProgression.getBuildingEra(player.Name)
+        local eraChanged = EraProgression.checkBuildingEraAdvancement(player.Name)
         if eraChanged then
-            EraSystem.advanceBuildingEra(player.Name)
-            local newEra = EraSystem.getBuildingEraInfo(EraSystem.getBuildingEra(player.Name))
+            EraProgression.advanceBuildingEra(player.Name)
+            local newEra = EraProgression.getBuildingEraInfo(EraProgression.getBuildingEra(player.Name))
             if newEra then
                 ResponseRemote:FireClient(player, {
                     type = "message",
@@ -293,7 +293,7 @@ local function handleResponse(player: Player, response: { [string]: any })
             buildCount = CommandExecutor._partsCreated or 0,
             bondLevel = BondSystem.getBondLevel(playerId),
             bondTier = BondSystem.getTier(playerId),
-            era = EraSystem.getBuildingEra(player.Name),
+            era = EraProgression.getBuildingEra(player.Name),
             timestamp = os.time(),
         }
         SaveSystem.syncToCloud(player, snapshot)
@@ -305,8 +305,8 @@ local function handleResponse(player: Player, response: { [string]: any })
                 bondLevel = BondSystem.getBondLevel(playerId),
                 bondTier = BondSystem.getTierName(playerId),
                 buildCount = CommandExecutor._partsCreated or 0,
-                era = EraSystem.getBuildingEra(player.Name),
-                eraName = (EraSystem.getBuildingEraInfo(EraSystem.getBuildingEra(player.Name)) or {}).name or "Unknown",
+                era = EraProgression.getBuildingEra(player.Name),
+                eraName = (EraProgression.getBuildingEraInfo(EraProgression.getBuildingEra(player.Name)) or {}).name or "Unknown",
             },
         })
 
@@ -392,7 +392,7 @@ local function init()
     NPCManager.init()
     AchievementManager.init()
     BondSystem.init()
-    EraSystem.init()
+    EraProgression.init()
     PowerGrid.init()
     SaveSystem.init()
     TutorialSystem.init()
