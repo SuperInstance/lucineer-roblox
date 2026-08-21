@@ -277,7 +277,7 @@ src/
 | Repository | Role |
 |-----------|------|
 | [lucineer-worker](../lucineer-worker) | Cloudflare Worker relay + Durable Object job queue |
-| [lucineer-brain](../lucineer-brain) | 4-stage AI pipeline (Seed → Planner → Coder → Hermes) |
+| [lucineer-system](../lucineer-system) | 4-stage AI pipeline (Seed → Planner → Coder → Hermes) |
 | [lucineer-memory](../lucineer-memory) | D1 player profiles, build history, conversations |
 | [lucineer-vector](../lucineer-vector) | Vectorize semantic skill library |
 | [lucineer-system](../lucineer-system) | Design docs and architecture specs |
